@@ -1,10 +1,8 @@
 const Sequelize = require('sequelize');
 const sequelize = require('../../config/database');
-const ItemCategory = require('./category');
-const Unit = require('./unit');
 
 const Item = sequelize.define('item', {
-    id: {
+    itemId: {
         type: Sequelize.INTEGER,
         autoIncrement: true,
         allowNull: false,
@@ -18,7 +16,7 @@ const Item = sequelize.define('item', {
         type: Sequelize.INTEGER,
         allowNull: false,
         references: {
-            model: 'category',
+            model: 'category', // Use table name as string
             key: 'categoryID'
         }
     },
@@ -26,7 +24,7 @@ const Item = sequelize.define('item', {
         type: Sequelize.INTEGER,
         allowNull: false,
         references: {
-            model: 'unit',
+            model: 'unit', // Use table name as string
             key: 'unitId'
         }
     },
@@ -34,11 +32,14 @@ const Item = sequelize.define('item', {
         type: Sequelize.STRING,
         allowNull: true
     }
+}, {
+    tableName: 'item' // Explicitly set to match model name
 });
 
-Item.associate = function () {
-    Item.belongsTo(ItemCategory, { foreignKey: 'itemCategory' });
-    Item.belongsTo(Unit, { foreignKey: 'unit' });
+// Associations will be defined in models/index.js
+Item.associate = function (models) {
+    Item.belongsTo(models.ItemCategory, { foreignKey: 'itemCategory' });
+    Item.belongsTo(models.Unit, { foreignKey: 'unit' });
 };
 
 module.exports = Item;

@@ -6,10 +6,7 @@ const GRNController = require('../controller/purchase/grnController');
 const InvoiceController = require('../controller/purchase/invoiceController');
 
 
-router.post('/create', PurchaseOrderController.createPurchaseOrder);
-router.get('/all', PurchaseOrderController.getAllPurchaseOrders);
-router.put('/update/:id', PurchaseOrderController.updatePurchaseOrder);
-router.delete('/delete/:id', PurchaseOrderController.deletePurchaseOrder);
+router.post('/createPo', PurchaseOrderController.createPo);
 
 router.post('/createGrn', GRNController.createGrn);
 router.get('/allGrns', GRNController.getAllGrns);

@@ -1,65 +1,76 @@
 const Sequelize = require('sequelize');
 const sequelize = require('../../config/database');
-const PurchaseOrder = require('./purchaseOrder');
 
-const OrderItem = sequelize.define('order_item', {
+const OrderItem = sequelize.define('OrderItem', {
     id: {
         type: Sequelize.INTEGER,
         autoIncrement: true,
-        primaryKey: true,
+        primaryKey: true
     },
     poId: {
         type: Sequelize.INTEGER,
         allowNull: false,
         references: {
-            model: 'purchase_order', // References PurchaseOrder table
-            key: 'poId',
-        },
+            model: 'purchase_order', // Use table name as string
+            key: 'poId'
+        }
     },
     itemId: {
         type: Sequelize.INTEGER,
         allowNull: false,
         references: {
-            model: 'items', // Assuming table name is 'items'
-            key: 'id',
-        },
+            model: 'item', // Use table name as string
+            key: 'itemId'
+        }
     },
     quantity: {
         type: Sequelize.INTEGER,
-        allowNull: false,
+        allowNull: false
     },
     rate: {
         type: Sequelize.DECIMAL(10, 2),
-        allowNull: false,
+        allowNull: false
     },
     amount: {
         type: Sequelize.DECIMAL(10, 2),
-        allowNull: false,
+        allowNull: false
     },
     discount: {
         type: Sequelize.DECIMAL(10, 2),
-        defaultValue: 0.00,
+        defaultValue: 0.00
     },
     tax1: {
         type: Sequelize.DECIMAL(10, 2),
-        defaultValue: 0.00,
+        defaultValue: 0.00
     },
     tax2: {
         type: Sequelize.DECIMAL(10, 2),
-        defaultValue: 0.00,
+        defaultValue: 0.00
     },
     totalTax: {
         type: Sequelize.DECIMAL(10, 2),
-        allowNull: false,
+        allowNull: false
     },
     totalAmount: {
         type: Sequelize.DECIMAL(10, 2),
-        allowNull: false,
+        allowNull: false
     },
+    acceptedQuantity: {
+        type: Sequelize.INTEGER,
+        allowNull: true
+    },
+    rejectedQuantity: {
+        type: Sequelize.INTEGER,
+        allowNull: true
+    }
+}, {
+    tableName: 'order_item'
 });
 
-OrderItem.associate = function () {
-    OrderItem.belongsTo(PurchaseOrder, { foreignKey: 'poId' });
+// Associations will be defined in models/index.js
+OrderItem.associate = function (models) {
+    OrderItem.belongsTo(models.PurchaseOrder, { foreignKey: 'poId', as: 'purchaseOrder' });
+    OrderItem.belongsTo(models.Item, { foreignKey: 'itemId', as: 'item' });
 };
 
 module.exports = OrderItem;

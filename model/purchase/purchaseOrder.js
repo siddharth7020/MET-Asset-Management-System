@@ -1,10 +1,7 @@
 const Sequelize = require('sequelize');
 const sequelize = require('../../config/database');
-const Institute = require('../../model/master/institute');
-const FinancialYear = require('../../model/master/financialYear');
-const Vendor = require('../../model/master/vendor');
 
-const PurchaseOrder = sequelize.define('purchase_order', {
+const PurchaseOrder = sequelize.define('PurchaseOrder', {
     poId: {
         type: Sequelize.INTEGER,
         autoIncrement: true,
@@ -22,7 +19,7 @@ const PurchaseOrder = sequelize.define('purchase_order', {
         type: Sequelize.INTEGER,
         allowNull: false,
         references: {
-            model: Institute,
+            model: 'institute', // Use table name as string
             key: 'instituteId'
         }
     },
@@ -30,7 +27,7 @@ const PurchaseOrder = sequelize.define('purchase_order', {
         type: Sequelize.INTEGER,
         allowNull: false,
         references: {
-            model: FinancialYear,
+            model: 'financialYear', // Use table name as string
             key: 'financialYearId'
         }
     },
@@ -38,7 +35,7 @@ const PurchaseOrder = sequelize.define('purchase_order', {
         type: Sequelize.INTEGER,
         allowNull: false,
         references: {
-            model: Vendor,
+            model: 'vendor', // Use table name as string
             key: 'vendorId'
         }
     },
@@ -55,18 +52,23 @@ const PurchaseOrder = sequelize.define('purchase_order', {
         allowNull: false
     },
     assetQuantity: {
-        type: Sequelize.VIRTUAL,
-        get() {
-            return this.getOrderItems()
-                .then(orderItems => new Set(orderItems.map(oi => oi.itemId)).size);
-        },
+        type: Sequelize.INTEGER,
+        allowNull: false
     },
+    assetData: {
+        type: Sequelize.JSON,
+        allowNull: true
+    }
+}, {
+    tableName: 'purchase_order'
 });
 
-PurchaseOrder.associate = function () {
-    PurchaseOrder.belongsTo(Institute, { foreignKey: 'instituteId' });
-    PurchaseOrder.belongsTo(FinancialYear, { foreignKey: 'financialYearId' });
-    PurchaseOrder.belongsTo(Vendor, { foreignKey: 'vendorId' });
+// Associations will be defined in models/index.js
+PurchaseOrder.associate = function (models) {
+    PurchaseOrder.belongsTo(models.Institute, { foreignKey: 'instituteId' });
+    PurchaseOrder.belongsTo(models.FinancialYear, { foreignKey: 'financialYearId' });
+    PurchaseOrder.belongsTo(models.Vendor, { foreignKey: 'vendorId' });
+    PurchaseOrder.hasMany(models.OrderItem, { foreignKey: 'poId', as: 'orderItems' });
 };
 
 module.exports = PurchaseOrder;

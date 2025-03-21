@@ -1,6 +1,6 @@
 const Item = require('../../model/master/item');
 
-exports.getItem = async (req, res, next) => {
+module.exports.getItem = async (req, res, next) => {
     try {
         const items = await Item.findAll();
         res.status(200).json({massage: "Fetched items successfully.", items: items});
