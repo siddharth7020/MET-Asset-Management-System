@@ -8,6 +8,10 @@ const grn = sequelize.define('grn', {
         allowNull: false,
         primaryKey: true
     },
+    poNo: {
+        type: Sequelize.STRING,
+        allowNull: true
+    },
     grnNO: {
         type: Sequelize.STRING,
         allowNull: false
@@ -15,14 +19,6 @@ const grn = sequelize.define('grn', {
     grnDate: {
         type: Sequelize.DATE,
         allowNull: false
-    },
-    poNo: {
-        type: Sequelize.STRING,
-        allowNull: true
-    },
-    poDate: {
-        type: Sequelize.DATE,
-        allowNull: true
     },
     instituteName: {
         type: Sequelize.STRING,

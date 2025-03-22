@@ -98,4 +98,102 @@ exports.createPo = async (req, res) => {
             message: 'Error creating Purchase Order'
         });
     }
-}
+};
+
+exports.getAllPo = async (req, res) => {
+    try {
+        const po = await PurchaseOrder.findAll();
+        return res.status(200).json({
+            success: true,
+            data: po
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error.message,
+            message: 'Error fetching Purchase Orders'
+        });
+    }
+};
+
+exports.updatePo = async (req, res) => {
+    try {
+        const id = req.params.id;
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: 'Purchase Order ID not provided'
+            });
+        }
+
+        const po = await PurchaseOrder.findByPk(id);
+        if (!po) {
+            return res.status(404).json({
+                success: false,
+                message: 'Purchase Order not found'
+            });
+        }
+
+        const updateData = req.body;
+
+        // Update the PO
+        await po.update(updateData);
+
+        // Update the asset data if provided
+        if (updateData.assetData) {
+            await Promise.all(updateData.assetData.map(async (item) => {
+                const orderItem = await OrderItem.findOne({
+                    where: {
+                        poId: id,
+                        itemId: item.itemId
+                    }
+                });
+
+                if (orderItem) {
+                    await orderItem.update(item);
+                }
+            }));
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Purchase Order updated successfully'
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error.message,
+            message: 'Error updating Purchase Order'
+        });
+    }
+};
+
+exports.deletePo = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const po = await PurchaseOrder.findByPk(id);
+        if (!po) {
+            return res.status(404).json({
+                success: false,
+                message: 'Purchase Order not found'
+            });
+        }
+
+        // Delete associated Order Items
+        await OrderItem.destroy({
+            where: { poId: id }
+        });
+
+        await po.destroy();
+        return res.status(200).json({
+            success: true,
+            message: 'Purchase Order deleted successfully'
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error.message,
+            message: 'Error deleting Purchase Order'
+        });
+    }
+};

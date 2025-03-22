@@ -7,6 +7,9 @@ const InvoiceController = require('../controller/purchase/invoiceController');
 
 
 router.post('/createPo', PurchaseOrderController.createPo);
+router.get('/allPos', PurchaseOrderController.getAllPo);
+router.put('/updatePo/:id', PurchaseOrderController.updatePo);
+router.delete('/deletePo/:id', PurchaseOrderController.deletePo);
 
 router.post('/createGrn', GRNController.createGrn);
 router.get('/allGrns', GRNController.getAllGrns);
