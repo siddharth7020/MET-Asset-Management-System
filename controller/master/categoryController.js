@@ -1,4 +1,4 @@
-const Category = require('../../model/master/category');
+const Category = require('../../models/master/category');
 
 exports.getCategory = (req, res, next) => {
     Category.findAll()

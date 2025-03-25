@@ -1,5 +1,5 @@
-const Invoice = require('../../model/purchase/invoice');
-const Grn = require('../../model/purchase/grn'); // Adjust path to your Grn model
+const Invoice = require('../../models/purchase/invoice');
+const Grn = require('../../models/purchase/GRN'); // Adjust path to your Grn model
 
 // Get all invoices with full GRN details
 exports.getAllInvoices = (req, res, next) => {

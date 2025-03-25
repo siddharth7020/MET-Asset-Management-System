@@ -1,4 +1,4 @@
-const Item = require('../../model/master/item');
+const Item = require('../../models/master/item');
 
 module.exports.getItem = async (req, res, next) => {
     try {

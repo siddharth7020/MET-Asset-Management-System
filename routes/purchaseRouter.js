@@ -1,24 +1,13 @@
+// routes/purchaseOrderRoutes.js
 const express = require('express');
 const router = express.Router();
+const purchaseOrderController = require('../controller/purchase/poController');
 
-const PurchaseOrderController = require('../controller/purchase/poController');
-const GRNController = require('../controller/purchase/grnController');
-const InvoiceController = require('../controller/purchase/invoiceController');
-
-
-router.post('/createPo', PurchaseOrderController.createPo);
-router.get('/allPos', PurchaseOrderController.getAllPo);
-router.put('/updatePo/:id', PurchaseOrderController.updatePo);
-router.delete('/deletePo/:id', PurchaseOrderController.deletePo);
-
-router.post('/createGrn', GRNController.createGrn);
-router.get('/allGrns', GRNController.getAllGrns);
-router.put('/updateGrn/:id', GRNController.updateGrn);
-router.delete('/deleteGrn/:id', GRNController.deleteGrn);
-
-router.post('/createInvoice', InvoiceController.createInvoice);
-router.get('/allInvoices', InvoiceController.getAllInvoices);
-router.put('/updateInvoice/:id', InvoiceController.updateInvoice);
-router.delete('/deleteInvoice/:id', InvoiceController.deleteInvoice);
+router.post('/', purchaseOrderController.createPurchaseOrder);
+router.get('/', purchaseOrderController.getAllPurchaseOrders);
+router.get('/:poId', purchaseOrderController.getPurchaseOrderById);
+router.put('/:poId', purchaseOrderController.updatePurchaseOrder);
+router.delete('/:poId', purchaseOrderController.deletePurchaseOrder);
+router.post('/:poId/grn', purchaseOrderController.createGRN);
 
 module.exports = router;

@@ -1,4 +1,4 @@
-const FinancialYear = require('../../model/master/financialYear');
+const FinancialYear = require('../../models/master/financialYear');
 
 exports.getFinancialYears = async (req, res, next) => {
     try {

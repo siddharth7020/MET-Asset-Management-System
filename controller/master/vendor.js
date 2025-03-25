@@ -1,5 +1,5 @@
 // set the controller 
-const Vendor = require('../../model/master/vendor');
+const Vendor = require('../../models/master/vendor');
 
 exports.getVendors = async (req, res, next) => {
     try {

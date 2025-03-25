@@ -1,4 +1,4 @@
-const Unit = require('../../model/master/unit');
+const Unit = require('../../models/master/unit');
 
 exports.getUnits = async (req, res, next) => {
     try {

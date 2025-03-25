@@ -1,57 +1,12 @@
-const PurchaseOrder = require('../../model/purchase/purchaseOrder');
-const OrderItem = require('../../model/purchase/orderItem');
-const Item = require('../../model/master/item');
-const FinancialYear = require('../../model/master/financialYear');
-const Vendor = require('../../model/master/vendor');
-const Institute = require('../../model/master/institute');
+const PurchaseOrder = require('../../models/purchase/PurchaseOrder');
+const OrderItem = require('../../models/purchase/OrderItem');
+const GRN = require('../../models/purchase/GRN');
+const GRNItem = require('../../models/purchase/GRNItem');
 
-
-exports.createPo = async (req, res) => {
+// CREATE a new Purchase Order with Order Items
+const createPurchaseOrder = async (req, res) => {
     try {
-        const { poDate, poNo, instituteId, financialYearId, vendorId, document, requestedBy, remark, assetQuantity, assetData } = req.body;
-
-        // Check if the financial year exists
-        const financialYear = await FinancialYear.findByPk(financialYearId);
-        if (!financialYear) {    
-            return res.status(404).json({
-                success: false,
-                message: 'Financial Year not found'
-            });
-        }
-
-        // Check if the vendor exists
-        const vendor = await Vendor.findByPk(vendorId);
-        if (!vendor) {
-            return res.status(404).json({
-                success: false,
-                message: 'Vendor not found'
-            });
-        }
-
-        // Check if the institute exists
-        const institute = await Institute.findByPk(instituteId);
-        if (!institute) {
-            return res.status(404).json({
-                success: false,
-                message: 'Institute not found'
-            });
-        }
-
-        // Check if the items exist
-        const items = await Item.findAll({
-            where: {
-                itemId: assetData.map(item => item.itemId)
-            }
-        });
-        if (items.length !== assetData.length) {
-            return res.status(404).json({
-                success: false,
-                message: 'Item not found'
-            });
-        }
-
-        // Create a new Purchase Order
-        const newPo = await PurchaseOrder.create({
+        const {
             poDate,
             poNo,
             instituteId,
@@ -60,140 +15,250 @@ exports.createPo = async (req, res) => {
             document,
             requestedBy,
             remark,
-            assetQuantity,
-            assetData
+            orderItems // Array of { itemId, quantity, rate, discount, tax1, tax2 }
+        } = req.body;
+
+        // Create Purchase Order
+        const purchaseOrder = await PurchaseOrder.create({
+            poDate,
+            poNo,
+            instituteId,
+            financialYearId,
+            vendorId,
+            document,
+            requestedBy,
+            remark
         });
 
-        // when creating a new Purchase Order, create Order Items
-        for (let i = 0; i < assetData.length; i++) {
-            await OrderItem.create({
-                poId: newPo.poId,
-                itemId: assetData[i].itemId,
-                quantity: assetData[i].quantity,
-                rate: assetData[i].rate,
-                amount: assetData[i].amount,
-                discount: assetData[i].discount,
-                tax1: assetData[i].tax1,
-                tax2: assetData[i].tax2,
-                totalTax: assetData[i].totalTax,
-                totalAmount: assetData[i].totalAmount,
-                acceptedQuantity: assetData[i].acceptedQuantity,
-                rejectedQuantity: assetData[i].rejectedQuantity
-            });
+        // Create associated Order Items
+        if (orderItems && orderItems.length > 0) {
+            const orderItemData = orderItems.map(item => ({
+                poId: purchaseOrder.poId,
+                itemId: item.itemId,
+                quantity: item.quantity,
+                rate: item.rate,
+                amount: item.quantity * item.rate,
+                discount: item.discount || 0,
+                tax1: item.tax1 || 0,
+                tax2: item.tax2 || 0,
+                totalTax: (item.tax1 || 0) + (item.tax2 || 0),
+                totalAmount: (item.quantity * item.rate) - (item.discount || 0) + ((item.tax1 || 0) + (item.tax2 || 0))
+            }));
+            await OrderItem.bulkCreate(orderItemData);
         }
 
-        // Return success response
-        return res.status(201).json({
-            success: true,
-            data: newPo,
-            message: 'Purchase Order created successfully'
+        // Fetch the created Purchase Order with its Order Items
+        const createdOrder = await PurchaseOrder.findByPk(purchaseOrder.poId, {
+            include: [{ model: OrderItem, as: 'orderItems' }]
         });
 
-
-
+        res.status(201).json(createdOrder);
     } catch (error) {
-        return res.status(500).json({
-            success: false,
-            error: error.message,
-            message: 'Error creating Purchase Order'
-        });
+        console.error('Error creating Purchase Order:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
 
-exports.getAllPo = async (req, res) => {
+// READ all Purchase Orders
+const getAllPurchaseOrders = async (req, res) => {
     try {
-        const po = await PurchaseOrder.findAll();
-        return res.status(200).json({
-            success: true,
-            data: po
+        const purchaseOrders = await PurchaseOrder.findAll({
+            include: [
+                { model: OrderItem, as: 'orderItems' },
+                { model: GRN, as: 'grns', include: [{ model: GRNItem, as: 'grnItems' }] }
+            ]
         });
+        res.status(200).json(purchaseOrders);
     } catch (error) {
-        return res.status(500).json({
-            success: false,
-            error: error.message,
-            message: 'Error fetching Purchase Orders'
-        });
+        console.error('Error fetching Purchase Orders:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
 
-exports.updatePo = async (req, res) => {
+// READ a single Purchase Order by poId
+const getPurchaseOrderById = async (req, res) => {
     try {
-        const id = req.params.id;
-        if (!id) {
-            return res.status(400).json({
-                success: false,
-                message: 'Purchase Order ID not provided'
-            });
+        const { poId } = req.params;
+        const purchaseOrder = await PurchaseOrder.findByPk(poId, {
+            include: [
+                { model: OrderItem, as: 'orderItems' },
+                { model: GRN, as: 'grns', include: [{ model: GRNItem, as: 'grnItems' }] }
+            ]
+        });
+
+        if (!purchaseOrder) {
+            return res.status(404).json({ message: 'Purchase Order not found' });
         }
 
-        const po = await PurchaseOrder.findByPk(id);
-        if (!po) {
-            return res.status(404).json({
-                success: false,
-                message: 'Purchase Order not found'
-            });
+        res.status(200).json(purchaseOrder);
+    } catch (error) {
+        console.error('Error fetching Purchase Order:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+// UPDATE a Purchase Order
+const updatePurchaseOrder = async (req, res) => {
+    try {
+        const { poId } = req.params;
+        const {
+            poDate,
+            poNo,
+            instituteId,
+            financialYearId,
+            vendorId,
+            document,
+            requestedBy,
+            remark,
+            orderItems // Updated array of Order Items
+        } = req.body;
+
+        const purchaseOrder = await PurchaseOrder.findByPk(poId);
+        if (!purchaseOrder) {
+            return res.status(404).json({ message: 'Purchase Order not found' });
         }
 
-        const updateData = req.body;
+        // Update Purchase Order details
+        await purchaseOrder.update({
+            poDate,
+            poNo,
+            instituteId,
+            financialYearId,
+            vendorId,
+            document,
+            requestedBy,
+            remark
+        });
 
-        // Update the PO
-        await po.update(updateData);
+        // Update or recreate Order Items
+        if (orderItems && orderItems.length > 0) {
+            // Delete existing Order Items
+            await OrderItem.destroy({ where: { poId } });
 
-        // Update the asset data if provided
-        if (updateData.assetData) {
-            await Promise.all(updateData.assetData.map(async (item) => {
+            // Create new Order Items
+            const orderItemData = orderItems.map(item => ({
+                poId: purchaseOrder.poId,
+                itemId: item.itemId,
+                quantity: item.quantity,
+                rate: item.rate,
+                amount: item.quantity * item.rate,
+                discount: item.discount || 0,
+                tax1: item.tax1 || 0,
+                tax2: item.tax2 || 0,
+                totalTax: (item.tax1 || 0) + (item.tax2 || 0),
+                totalAmount: (item.quantity * item.rate) - (item.discount || 0) + ((item.tax1 || 0) + (item.tax2 || 0))
+            }));
+            await OrderItem.bulkCreate(orderItemData);
+        }
+
+        // Fetch updated Purchase Order
+        const updatedOrder = await PurchaseOrder.findByPk(poId, {
+            include: [{ model: OrderItem, as: 'orderItems' }]
+        });
+
+        res.status(200).json(updatedOrder);
+    } catch (error) {
+        console.error('Error updating Purchase Order:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+// DELETE a Purchase Order
+const deletePurchaseOrder = async (req, res) => {
+    try {
+        const { poId } = req.params;
+        const purchaseOrder = await PurchaseOrder.findByPk(poId);
+
+        if (!purchaseOrder) {
+            return res.status(404).json({ message: 'Purchase Order not found' });
+        }
+
+        // Delete associated Order Items and GRNs (cascade will handle this if configured in DB)
+        await purchaseOrder.destroy();
+        res.status(200).json({ message: 'Purchase Order deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting Purchase Order:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+// CREATE a GRN for a Purchase Order
+const createGRN = async (req, res) => {
+    try {
+        const { poId } = req.params;
+        const { grnNo, grnDate, challanNo, challanDate, document, remark, grnItems } = req.body;
+
+        // Check if PurchaseOrder exists
+        const purchaseOrder = await PurchaseOrder.findByPk(poId);
+        if (!purchaseOrder) {
+            return res.status(404).json({ message: 'Purchase Order not found' });
+        }
+
+        // Validate orderItemId values
+        if (grnItems && grnItems.length > 0) {
+            for (const item of grnItems) {
                 const orderItem = await OrderItem.findOne({
                     where: {
-                        poId: id,
-                        itemId: item.itemId
+                        id: item.orderItemId,
+                        poId: poId // Ensure orderItemId belongs to this poId
                     }
                 });
-
-                if (orderItem) {
-                    await orderItem.update(item);
+                if (!orderItem) {
+                    return res.status(400).json({
+                        message: `OrderItem with ID ${item.orderItemId} not found for Purchase Order ${poId}`
+                    });
                 }
-            }));
+            }
         }
 
-        return res.status(200).json({
-            success: true,
-            message: 'Purchase Order updated successfully'
-        });
+        // Use a transaction to ensure atomicity
+        const transaction = await sequelize.transaction();
+        try {
+            // Create GRN
+            const grn = await GRN.create({
+                poId,
+                grnNo,
+                grnDate,
+                challanNo,
+                challanDate,
+                document,
+                remark
+            }, { transaction });
+
+            // Create GRN Items
+            if (grnItems && grnItems.length > 0) {
+                const grnItemData = grnItems.map(item => ({
+                    grnId: grn.id,
+                    orderItemId: item.orderItemId,
+                    receivedQuantity: item.receivedQuantity,
+                    rejectedQuantity: item.rejectedQuantity || 0
+                }));
+                await GRNItem.bulkCreate(grnItemData, { transaction });
+            }
+
+            await transaction.commit();
+
+            // Fetch the created GRN with its items
+            const createdGRN = await GRN.findByPk(grn.id, {
+                include: [{ model: GRNItem, as: 'grnItems' }]
+            });
+
+            res.status(201).json(createdGRN);
+        } catch (error) {
+            await transaction.rollback();
+            throw error;
+        }
     } catch (error) {
-        return res.status(500).json({
-            success: false,
-            error: error.message,
-            message: 'Error updating Purchase Order'
-        });
+        console.error('Error creating GRN:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
 
-exports.deletePo = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const po = await PurchaseOrder.findByPk(id);
-        if (!po) {
-            return res.status(404).json({
-                success: false,
-                message: 'Purchase Order not found'
-            });
-        }
-
-        // Delete associated Order Items
-        await OrderItem.destroy({
-            where: { poId: id }
-        });
-
-        await po.destroy();
-        return res.status(200).json({
-            success: true,
-            message: 'Purchase Order deleted successfully'
-        });
-    } catch (error) {
-        return res.status(500).json({
-            success: false,
-            error: error.message,
-            message: 'Error deleting Purchase Order'
-        });
-    }
+module.exports = {
+    createPurchaseOrder,
+    getAllPurchaseOrders,
+    getPurchaseOrderById,
+    updatePurchaseOrder,
+    deletePurchaseOrder,
+    createGRN
 };

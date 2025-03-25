@@ -1,24 +1,44 @@
 const express = require("express");
 
+// Database configuration
 const db = require("./config/database");
-const router = require("./routes/routers");
-const PurchaseOrder = require("./routes/purchaseRouter");
+
+// Routers
+const mainRouter = require("./routes/routers"); // Assuming this is the intended main router file
+const purchaseRouter = require("./routes/purchaseRouter"); // Renamed to avoid conflict
+
+// Models and Associations
+const PurchaseOrder = require("./models/purchase/PurchaseOrder");
+const OrderItem = require("./models/purchase/OrderItem");
+const GRN = require("./models/purchase/GRN");
+const GRNItem = require("./models/purchase/GRNItem");
+const defineAssociations = require("./models/purchase/associations");
 
 const app = express();
 app.use(express.json());
-app.use('/api',router);
-app.use('/api/purchase',PurchaseOrder);
+
+// Routes
+app.use("/api", mainRouter); // Main router for general routes
+app.use("/api/purchase", purchaseRouter); // Router for purchase-related routes
 
 const port = 5000;
 
-db.sync()
-    .then(() => {
-        console.log("Database connected");
-    })
-    .catch((err) => {
-        console.log("Error connecting to database", err);
-    });
+// Define associations
+defineAssociations();
 
-app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
-});
+// Sync database and start server
+const startServer = async () => {
+    try {
+        await db.sync({ force: false }); // Use { force: true } only during development to drop and recreate tables
+        console.log("Database connected");
+        
+        app.listen(port, () => {
+            console.log(`Server is running on port ${port}`);
+        });
+    } catch (err) {
+        console.error("Error connecting to database:", err);
+        process.exit(1); // Exit the process if the database connection fails
+    }
+};
+
+startServer();
