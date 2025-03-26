@@ -9,5 +9,9 @@ router.get('/:poId', purchaseOrderController.getPurchaseOrderById);
 router.put('/:poId', purchaseOrderController.updatePurchaseOrder);
 router.delete('/:poId', purchaseOrderController.deletePurchaseOrder);
 router.post('/:poId/grn', purchaseOrderController.createGRN);
+router.put('/:poId/grn/:grnId', purchaseOrderController.updateGRN); // New route
+router.delete('/:poId/grn/:grnId', purchaseOrderController.deleteGRN); // New
+router.get('/:poId/grn/:grnId', purchaseOrderController.getGRNById);   // New
+router.get('/:poId/grn', purchaseOrderController.getAllGRNs);
 
 module.exports = router;

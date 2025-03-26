@@ -1,3 +1,4 @@
+const sequelize = require('../../config/database');
 const PurchaseOrder = require('../../models/purchase/PurchaseOrder');
 const OrderItem = require('../../models/purchase/OrderItem');
 const GRN = require('../../models/purchase/GRN');
@@ -254,11 +255,175 @@ const createGRN = async (req, res) => {
     }
 };
 
+
+
+const updateGRN = async (req, res) => {
+    try {
+        const { poId, grnId } = req.params; // poId and grnId from URL
+        const { grnNo, grnDate, challanNo, challanDate, document, remark, grnItems } = req.body;
+
+        // Check if PurchaseOrder exists
+        const purchaseOrder = await PurchaseOrder.findByPk(poId);
+        if (!purchaseOrder) {
+            return res.status(404).json({ message: 'Purchase Order not found' });
+        }
+
+        // Check if GRN exists
+        const grn = await GRN.findOne({ where: { id: grnId, poId } });
+        if (!grn) {
+            return res.status(404).json({ message: 'GRN not found for this Purchase Order' });
+        }
+
+        // Validate orderItemId values if grnItems are provided
+        if (grnItems && grnItems.length > 0) {
+            for (const item of grnItems) {
+                const orderItem = await OrderItem.findOne({
+                    where: { id: item.orderItemId, poId }
+                });
+                if (!orderItem) {
+                    return res.status(400).json({
+                        message: `OrderItem with ID ${item.orderItemId} not found for Purchase Order ${poId}`
+                    });
+                }
+            }
+        }
+
+        // Use a transaction for atomic updates
+        const transaction = await sequelize.transaction();
+        try {
+            // Update GRN details
+            await grn.update({
+                grnNo,
+                grnDate,
+                challanNo,
+                challanDate,
+                document,
+                remark
+            }, { transaction });
+
+            // If grnItems are provided, replace existing GRNItems
+            if (grnItems && grnItems.length > 0) {
+                // Delete existing GRNItems
+                await GRNItem.destroy({ where: { grnId }, transaction });
+
+                // Create new GRNItems
+                const grnItemData = grnItems.map(item => ({
+                    grnId: grn.id,
+                    orderItemId: item.orderItemId,
+                    receivedQuantity: item.receivedQuantity,
+                    rejectedQuantity: item.rejectedQuantity || 0
+                }));
+                await GRNItem.bulkCreate(grnItemData, { transaction });
+            }
+
+            await transaction.commit();
+
+            // Fetch the updated GRN with its items
+            const updatedGRN = await GRN.findByPk(grn.id, {
+                include: [{ model: GRNItem, as: 'grnItems' }]
+            });
+
+            res.status(200).json(updatedGRN);
+        } catch (error) {
+            await transaction.rollback();
+            throw error;
+        }
+    } catch (error) {
+        console.error('Error updating GRN:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+
+
+// DELETE a GRN
+const deleteGRN = async (req, res) => {
+    try {
+        const { poId, grnId } = req.params;
+
+        // Check if PurchaseOrder exists
+        const purchaseOrder = await PurchaseOrder.findByPk(poId);
+        if (!purchaseOrder) {
+            return res.status(404).json({ message: 'Purchase Order not found' });
+        }
+
+        // Check if GRN exists
+        const grn = await GRN.findOne({ where: { id: grnId, poId } });
+        if (!grn) {
+            return res.status(404).json({ message: 'GRN not found for this Purchase Order' });
+        }
+
+        // Delete GRN (GRNItems will be deleted via cascade if configured, or manually)
+        await grn.destroy();
+
+        res.status(200).json({ message: 'GRN deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting GRN:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+// GET a GRN by ID
+const getGRNById = async (req, res) => {
+    try {
+        const { poId, grnId } = req.params;
+
+        // Check if PurchaseOrder exists
+        const purchaseOrder = await PurchaseOrder.findByPk(poId);
+        if (!purchaseOrder) {
+            return res.status(404).json({ message: 'Purchase Order not found' });
+        }
+
+        // Fetch GRN with its GRNItems
+        const grn = await GRN.findOne({
+            where: { id: grnId, poId },
+            include: [{ model: GRNItem, as: 'grnItems' }]
+        });
+
+        if (!grn) {
+            return res.status(404).json({ message: 'GRN not found for this Purchase Order' });
+        }
+
+        res.status(200).json(grn);
+    } catch (error) {
+        console.error('Error fetching GRN:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+// GET all GRNs for a Purchase Order
+const getAllGRNs = async (req, res) => {
+    try {
+        const { poId } = req.params;
+
+        // Check if PurchaseOrder exists
+        const purchaseOrder = await PurchaseOrder.findByPk(poId);
+        if (!purchaseOrder) {
+            return res.status(404).json({ message: 'Purchase Order not found' });
+        }
+
+        // Fetch all GRNs for this poId with their GRNItems
+        const grns = await GRN.findAll({
+            where: { poId },
+            include: [{ model: GRNItem, as: 'grnItems' }]
+        });
+
+        res.status(200).json(grns);
+    } catch (error) {
+        console.error('Error fetching GRNs:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
 module.exports = {
     createPurchaseOrder,
     getAllPurchaseOrders,
     getPurchaseOrderById,
     updatePurchaseOrder,
     deletePurchaseOrder,
-    createGRN
+    createGRN,
+    updateGRN,
+    deleteGRN,    // New
+    getGRNById,   // New
+    getAllGRNs    // New
 };
