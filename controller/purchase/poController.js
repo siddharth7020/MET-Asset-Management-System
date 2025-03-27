@@ -3,6 +3,8 @@ const PurchaseOrder = require('../../models/purchase/PurchaseOrder');
 const OrderItem = require('../../models/purchase/OrderItem');
 const GRN = require('../../models/purchase/GRN');
 const GRNItem = require('../../models/purchase/GRNItem');
+const  StockStorage = require('../../models/distribution/stockStorage');
+const Item = require('../../models/master/item');
 
 // CREATE a new Purchase Order with Order Items
 const createPurchaseOrder = async (req, res) => {
@@ -189,33 +191,40 @@ const createGRN = async (req, res) => {
         const { poId } = req.params;
         const { grnNo, grnDate, challanNo, challanDate, document, remark, grnItems } = req.body;
 
-        // Check if PurchaseOrder exists
+        if (!grnNo || !grnDate || !challanNo || !challanDate) {
+            return res.status(400).json({ message: 'grnNo, grnDate, challanNo, and challanDate are required' });
+        }
+
         const purchaseOrder = await PurchaseOrder.findByPk(poId);
         if (!purchaseOrder) {
             return res.status(404).json({ message: 'Purchase Order not found' });
         }
 
-        // Validate orderItemId values
         if (grnItems && grnItems.length > 0) {
-            for (const item of grnItems) {
-                const orderItem = await OrderItem.findOne({
-                    where: {
-                        id: item.orderItemId,
-                        poId: poId // Ensure orderItemId belongs to this poId
-                    }
+            const orderItemIds = grnItems.map(item => item.orderItemId);
+            const orderItems = await OrderItem.findAll({
+                where: { id: orderItemIds, poId }
+            });
+
+            if (orderItems.length !== orderItemIds.length) {
+                const invalidIds = orderItemIds.filter(id => !orderItems.some(item => item.id === id));
+                return res.status(400).json({
+                    message: `OrderItem IDs not found for Purchase Order ${poId}: ${invalidIds.join(', ')}`
                 });
-                if (!orderItem) {
+            }
+
+            for (const item of grnItems) {
+                const orderItem = orderItems.find(oi => oi.id === item.orderItemId);
+                if (item.receivedQuantity > orderItem.quantity) {
                     return res.status(400).json({
-                        message: `OrderItem with ID ${item.orderItemId} not found for Purchase Order ${poId}`
+                        message: `Received quantity (${item.receivedQuantity}) exceeds ordered quantity (${orderItem.quantity}) for OrderItem ${item.orderItemId}`
                     });
                 }
             }
         }
 
-        // Use a transaction to ensure atomicity
         const transaction = await sequelize.transaction();
         try {
-            // Create GRN
             const grn = await GRN.create({
                 poId,
                 grnNo,
@@ -226,7 +235,6 @@ const createGRN = async (req, res) => {
                 remark
             }, { transaction });
 
-            // Create GRN Items
             if (grnItems && grnItems.length > 0) {
                 const grnItemData = grnItems.map(item => ({
                     grnId: grn.id,
@@ -235,11 +243,29 @@ const createGRN = async (req, res) => {
                     rejectedQuantity: item.rejectedQuantity || 0
                 }));
                 await GRNItem.bulkCreate(grnItemData, { transaction });
+
+                // Fetch OrderItems to get correct itemId
+                const orderItemIds = grnItems.map(item => item.orderItemId);
+                const orderItems = await OrderItem.findAll({
+                    where: { id: orderItemIds },
+                    attributes: ['id', 'itemId'] // Only need id and itemId
+                });
+
+                const stockData = grnItems.map(item => {
+                    const orderItem = orderItems.find(oi => oi.id === item.orderItemId);
+                    return {
+                        poId,
+                        grnId: grn.id,
+                        itemId: orderItem.itemId, // Use the correct itemId from OrderItem
+                        quantity: item.receivedQuantity,
+                        remark: item.remark
+                    };
+                });
+                await StockStorage.bulkCreate(stockData, { transaction });
             }
 
             await transaction.commit();
 
-            // Fetch the created GRN with its items
             const createdGRN = await GRN.findByPk(grn.id, {
                 include: [{ model: GRNItem, as: 'grnItems' }]
             });
@@ -415,6 +441,128 @@ const getAllGRNs = async (req, res) => {
     }
 };
 
+
+// CREATE or UPDATE StockStorage when GRN is processed
+const updateStockStorage = async (req, res) => {
+    try {
+        const { poId, grnId } = req.params;
+        const { grnItems } = req.body;
+
+        // Validate PurchaseOrder and GRN
+        const purchaseOrder = await PurchaseOrder.findByPk(poId);
+        if (!purchaseOrder) {
+            return res.status(404).json({ message: 'Purchase Order not found' });
+        }
+        const grn = await GRN.findOne({ where: { id: grnId, poId } });
+        if (!grn) {
+            return res.status(404).json({ message: 'GRN not found' });
+        }
+
+        // Process each GRNItem
+        if (grnItems && grnItems.length > 0) {
+            for (const item of grnItems) {
+                const grnItem = await GRNItem.findByPk(item.orderItemId);
+                if (!grnItem) {
+                    return res.status(400).json({ message: `GRNItem with orderItemId ${item.orderItemId} not found` });
+                }
+
+                // Check if StockStorage entry exists
+                const stockEntry = await StockStorage.findOne({
+                    where: { poId, grnId, itemId: grnItem.orderItemId }
+                });
+
+                if (stockEntry) {
+                    // Update existing entry
+                    await stockEntry.update({
+                        quantity: item.receivedQuantity,
+                        remark: item.remark || stockEntry.remark
+                    });
+                } else {
+                    // Create new entry
+                    await StockStorage.create({
+                        poId,
+                        grnId,
+                        itemId: grnItem.orderItemId,
+                        quantity: item.receivedQuantity,
+                        remark: item.remark
+                    });
+                }
+            }
+        }
+
+        // Fetch updated stock for this GRN
+        const stock = await StockStorage.findAll({ where: { grnId } });
+        res.status(200).json(stock);
+    } catch (error) {
+        console.error('Error updating StockStorage:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+// GET StockStorage details for a specific itemId (how many GRNs it appears in)
+const getStockStorageByItemId = async (req, res) => {
+    try {
+        const { itemId } = req.params;
+
+        // Validate itemId
+        const item = await Item.findByPk(itemId);
+        if (!item) {
+            return res.status(404).json({ message: `Item with ID ${itemId} not found` });
+        }
+
+        // Fetch StockStorage entries for this itemId, grouped by grnId
+        const stockEntries = await StockStorage.findAll({
+            where: { itemId },
+            attributes: [
+                'grnId',
+                'grn.id', // Include grn.id
+                'purchaseOrder.poId', // Include purchaseOrder.poId
+                [sequelize.fn('SUM', sequelize.col('quantity')), 'totalQuantity'], // Sum quantities per grnId
+            ],
+            group: ['grnId', 'grn.id', 'purchaseOrder.poId'], // Group by grnId, grn.id, and purchaseOrder.poId
+            include: [
+                { model: GRN, as: 'grn', attributes: ['grnNo', 'grnDate'] },
+                { model: PurchaseOrder, as: 'purchaseOrder', attributes: ['poId', 'poNo'] }
+            ],
+            order: [['grnId', 'ASC']] // Optional: sort by grnId
+        });
+
+        if (stockEntries.length === 0) {
+            return res.status(404).json({ message: `No stock entries found for itemId ${itemId}` });
+        }
+
+        // Calculate totalItemCount (sum of totalQuantity across all GRNs)
+        const totalItemCount = stockEntries.reduce((sum, entry) => {
+            return sum + parseInt(entry.getDataValue('totalQuantity'));
+        }, 0);
+
+        // Format response
+        const response = {
+            itemId,
+            itemName: item.itemName, // Changed from item.itemName to item.name (assuming standard naming)
+            grnCount: stockEntries.length, // Number of unique GRNs
+            totalItemCount, // Total quantity across all GRNs
+            grnDetails: stockEntries.map(entry => ({
+                grnId: entry.grnId,
+                grnNo: entry.grn?.grnNo,
+                grnDate: entry.grn?.grnDate,
+                poId: entry.purchaseOrder?.poId,
+                poNo: entry.purchaseOrder?.poNo,
+                totalQuantity: parseInt(entry.getDataValue('totalQuantity')) // Quantity per GRN
+            }))
+        };
+
+        res.status(200).json(response);
+    } catch (error) {
+        console.error('Error fetching StockStorage by itemId:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+
+
+// Integrate with createGRN (without location)
+
 module.exports = {
     createPurchaseOrder,
     getAllPurchaseOrders,
@@ -423,7 +571,9 @@ module.exports = {
     deletePurchaseOrder,
     createGRN,
     updateGRN,
-    deleteGRN,    // New
-    getGRNById,   // New
-    getAllGRNs    // New
+    deleteGRN,
+    getGRNById,
+    getAllGRNs,
+    updateStockStorage,
+    getStockStorageByItemId
 };
