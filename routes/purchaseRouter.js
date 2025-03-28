@@ -20,4 +20,7 @@ router.post('/:poId/grn/:grnId/stock', purchaseOrderController.updateStockStorag
 // New route for StockStorage by itemId
 router.get('/stock/item/:itemId', purchaseOrderController.getStockStorageByItemId);
 
+
+router.post('/distribution', purchaseOrderController.createDistribution); // New endpoint
+
 module.exports = router;

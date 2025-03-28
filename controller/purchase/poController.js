@@ -5,6 +5,10 @@ const GRN = require('../../models/purchase/GRN');
 const GRNItem = require('../../models/purchase/GRNItem');
 const  StockStorage = require('../../models/distribution/stockStorage');
 const Item = require('../../models/master/item');
+const Distribution = require('../../models/distribution/Distribution');
+const DistributionItem = require('../../models/distribution/DistributionItem');
+const FinancialYear = require('../../models/master/financialYear');
+const Institute = require('../../models/master/institute');
 
 // CREATE a new Purchase Order with Order Items
 const createPurchaseOrder = async (req, res) => {
@@ -281,8 +285,6 @@ const createGRN = async (req, res) => {
     }
 };
 
-
-
 const updateGRN = async (req, res) => {
     try {
         const { poId, grnId } = req.params; // poId and grnId from URL
@@ -359,7 +361,6 @@ const updateGRN = async (req, res) => {
         res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
-
 
 
 // DELETE a GRN
@@ -559,6 +560,126 @@ const getStockStorageByItemId = async (req, res) => {
     }
 };
 
+// CREATE a Stock Distribution
+const createDistribution = async (req, res) => {
+    try {
+        const { financialYearId, instituteId, employeeName, location, documents, remark, items } = req.body;
+
+        // Validate required fields
+        if (!financialYearId || !instituteId || !employeeName || !location || !items || items.length === 0) {
+            return res.status(400).json({ message: 'financialYearId, instituteId, employeeName, location, and items are required' });
+        }
+
+        // Validate financialYearId and instituteId
+        const financialYear = await FinancialYear.findByPk(financialYearId);
+        if (!financialYear) {
+            return res.status(404).json({ message: `Financial Year with ID ${financialYearId} not found` });
+        }
+        const institute = await Institute.findByPk(instituteId);
+        if (!institute) {
+            return res.status(404).json({ message: `Institute with ID ${instituteId} not found` });
+        }
+
+        // Validate items and stock availability
+        const itemIds = items.map(item => item.itemId);
+        const stockEntries = await StockStorage.findAll({
+            where: { itemId: itemIds },
+            attributes: ['itemId', [sequelize.fn('SUM', sequelize.col('quantity')), 'totalStock']],
+            group: ['itemId']
+        });
+
+        for (const item of items) {
+            const stock = stockEntries.find(se => se.itemId === item.itemId);
+            const totalStock = stock ? parseInt(stock.getDataValue('totalStock')) : 0;
+            if (!stock || item.issueQuantity > totalStock) {
+                const itemName = (await Item.findByPk(item.itemId))?.name || 'Unknown';
+                return res.status(400).json({
+                    message: `Insufficient stock for item ${itemName} (ID: ${item.itemId}). Requested: ${item.issueQuantity}, Available: ${totalStock}`
+                });
+            }
+        }
+
+        let distribution;
+        const transaction = await sequelize.transaction();
+        try {
+            // Create Distribution
+            distribution = await Distribution.create({
+                financialYearId,
+                instituteId,
+                employeeName,
+                location,
+                documents,
+                remark
+            }, { transaction });
+
+            // Create Distribution Items
+            const distributionItems = items.map(item => ({
+                distributionId: distribution.id,
+                itemId: item.itemId,
+                itemName: item.itemName,
+                issueQuantity: item.issueQuantity
+            }));
+            await DistributionItem.bulkCreate(distributionItems, { transaction });
+
+            // Deduct stock from StockStorage
+            for (const item of items) {
+                let remainingQuantity = item.issueQuantity;
+                const stockRecords = await StockStorage.findAll({
+                    where: { itemId: item.itemId },
+                    order: [['createdAt', 'ASC']] // Oldest first
+                });
+
+                const availableStock = stockRecords.filter(stock => stock.quantity > 0);
+                if (availableStock.length === 0) {
+                    throw new Error(`No available stock for itemId ${item.itemId}`);
+                }
+
+                for (const stock of availableStock) {
+                    if (remainingQuantity <= 0) break;
+                    const deduct = Math.min(remainingQuantity, stock.quantity);
+                    await stock.update({ quantity: stock.quantity - deduct }, { transaction });
+                    remainingQuantity -= deduct;
+                }
+
+                if (remainingQuantity > 0) {
+                    throw new Error(`Could not deduct full quantity for itemId ${item.itemId}`);
+                }
+            }
+
+            await transaction.commit();
+        } catch (error) {
+            await transaction.rollback();
+            throw error; // Re-throw to outer catch
+        }
+
+        // Fetch created distribution after commit (outside transaction)
+        try {
+            const createdDistribution = await Distribution.findByPk(distribution.id, {
+                include: [{ model: DistributionItem, as: 'item', include: [{ model: Item, as: 'item', attributes: ['name'] }] }]
+            });
+
+            if (!createdDistribution) {
+                return res.status(500).json({ message: 'Distribution created but could not be retrieved' });
+            }
+
+            res.status(201).json({
+                message: 'Distribution created successfully',
+                data: createdDistribution
+            });
+        } catch (fetchError) {
+            console.error('Error fetching created Distribution:', fetchError);
+            // Transaction is already committed, so no rollback; just return success with a note
+            return res.status(201).json({
+                message: 'Distribution created successfully, but retrieval failed',
+                data: { id: distribution.id },
+                error: fetchError.message
+            });
+        }
+    } catch (error) {
+        console.error('Error creating Distribution:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
 
 
 // Integrate with createGRN (without location)
@@ -575,5 +696,6 @@ module.exports = {
     getGRNById,
     getAllGRNs,
     updateStockStorage,
-    getStockStorageByItemId
+    getStockStorageByItemId,
+    createDistribution
 };
