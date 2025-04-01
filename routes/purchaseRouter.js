@@ -22,5 +22,6 @@ router.get('/stock/item/:itemId', purchaseOrderController.getStockStorageByItemI
 
 
 router.post('/distribution', purchaseOrderController.createDistribution); // New endpoint
+router.get('/distribution/:id', purchaseOrderController.getDistributionById); // New endpoint
 
 module.exports = router;

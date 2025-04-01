@@ -681,8 +681,27 @@ const createDistribution = async (req, res) => {
     }
 };
 
+// get a Distribution by ID
+const getDistributionById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const distribution = await Distribution.findByPk(id, {
+            include: [{ model: DistributionItem, as: 'item', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] }] // Include Item details
+        });
 
-// Integrate with createGRN (without location)
+        if (!distribution) {
+            return res.status(404).json({ message: 'Distribution not found' });
+        }
+
+        res.json(distribution);
+    } catch (error) {
+        console.error('Error fetching Distribution:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+
+
 
 module.exports = {
     createPurchaseOrder,
@@ -697,5 +716,6 @@ module.exports = {
     getAllGRNs,
     updateStockStorage,
     getStockStorageByItemId,
-    createDistribution
+    createDistribution,
+    getDistributionById
 };
