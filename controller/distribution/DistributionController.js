@@ -196,12 +196,28 @@ const deleteDistribution = async (req, res) => {
         res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
-// Update a Distribution
+// get all Distribution
+const getAllDistributions = async (req, res) => {
+    try {
+        const distributions = await Distribution.findAll({
+            include: [{ model: DistributionItem, as: 'item', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] }] // Include Item details
+        });
+        res.json(distributions);
+    } catch (error) {
+        console.error('Error fetching Distributions:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+
+
+
 
 
 // Export the functions
 module.exports = {
     createDistribution,
     getDistributionById,
-    deleteDistribution
+    deleteDistribution,
+    getAllDistributions
 };

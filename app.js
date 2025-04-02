@@ -7,11 +7,6 @@ const db = require("./config/database");
 const mainRouter = require("./routes/routers"); // Assuming this is the intended main router file
 const purchaseRouter = require("./routes/purchaseRouter"); // Renamed to avoid conflict
 
-// Models and Associations
-const PurchaseOrder = require("./models/purchase/PurchaseOrder");
-const OrderItem = require("./models/purchase/OrderItem");
-const GRN = require("./models/purchase/GRN");
-const GRNItem = require("./models/purchase/GRNItem");
 const defineAssociations = require("./models/purchase/associations");
 
 const app = express();
