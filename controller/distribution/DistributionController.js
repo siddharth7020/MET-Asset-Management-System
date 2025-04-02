@@ -40,7 +40,7 @@ const createDistribution = async (req, res) => {
             const stock = stockEntries.find(se => se.itemId === item.itemId);
             const totalStock = stock ? parseInt(stock.getDataValue('totalStock')) : 0;
             if (!stock || item.issueQuantity > totalStock) {
-                const itemName = (await Item.findByPk(item.itemId))?.name || 'Unknown';
+                const itemName = (await Item.findByPk(item.itemId))?.itemName || 'Unknown';
                 return res.status(400).json({
                     message: `Insufficient stock for item ${itemName} (ID: ${item.itemId}). Requested: ${item.issueQuantity}, Available: ${totalStock}`
                 });
@@ -103,7 +103,7 @@ const createDistribution = async (req, res) => {
         // Fetch created distribution after commit (outside transaction)
         try {
             const createdDistribution = await Distribution.findByPk(distribution.id, {
-                include: [{ model: DistributionItem, as: 'item', include: [{ model: Item, as: 'item', attributes: ['name'] }] }]
+                include: [{ model: DistributionItem, as: 'item', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] }]
             });
 
             if (!createdDistribution) {
@@ -148,8 +148,60 @@ const getDistributionById = async (req, res) => {
     }
 };
 
+// if i delete a distribution, the stock should be added back to the stock storage
+const deleteDistribution = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const distribution = await Distribution.findByPk(id, { include: [{ model: DistributionItem, as: 'item' }] });
+
+        if (!distribution) {
+            return res.status(404).json({ message: 'Distribution not found' });
+        }
+
+        // Start a transaction
+        const transaction = await sequelize.transaction();
+        try {
+            // Add stock back to StockStorage
+            for (const item of distribution.item) {
+                const stockRecord = await StockStorage.findOne({
+                    where: { itemId: item.itemId },
+                    order: [['createdAt', 'DESC']] // Newest first
+                });
+
+                if (stockRecord) {
+                    await stockRecord.update({ quantity: stockRecord.quantity + item.issueQuantity }, { transaction });
+                } else {
+                    await StockStorage.create({
+                        itemId: item.itemId,
+                        quantity: item.issueQuantity
+                    }, { transaction });
+                }
+            }
+
+            // Delete the distribution and its items
+            await DistributionItem.destroy({ where: { distributionId: id }, transaction });
+            await Distribution.destroy({ where: { id }, transaction });
+
+            // Commit the transaction
+            await transaction.commit();
+
+            res.status(200).json({ message: 'Distribution deleted successfully' });
+        } catch (error) {
+            await transaction.rollback();
+            console.error('Error deleting Distribution:', error);
+            res.status(500).json({ message: 'Internal server error', error: error.message });
+        }
+    } catch (error) {
+        console.error('Error fetching Distribution for deletion:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+// Update a Distribution
+
+
 // Export the functions
 module.exports = {
     createDistribution,
-    getDistributionById
+    getDistributionById,
+    deleteDistribution
 };

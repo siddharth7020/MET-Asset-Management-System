@@ -28,5 +28,6 @@ router.get('/stock/item', StockStorageController.getAllStockStorage); // New rou
 
 router.post('/distribution', DistributionController.createDistribution); // New endpoint
 router.get('/distribution/:id', DistributionController.getDistributionById); // New endpoint
+router.delete('/distribution/:id', DistributionController.deleteDistribution); // New endpoint
 
 module.exports = router;
