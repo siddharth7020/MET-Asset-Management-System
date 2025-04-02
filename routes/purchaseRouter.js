@@ -23,6 +23,7 @@ router.post('/:poId/grn/:grnId/stock', StockStorageController.updateStockStorage
 
 // New route for StockStorage by itemId
 router.get('/stock/item/:itemId', StockStorageController.getStockStorageByItemId);
+router.get('/stock/item', StockStorageController.getAllStockStorage); // New route
 
 
 router.post('/distribution', DistributionController.createDistribution); // New endpoint

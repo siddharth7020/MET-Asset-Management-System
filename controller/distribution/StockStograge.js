@@ -124,7 +124,19 @@ const getStockStorageByItemId = async (req, res) => {
     }
 };
 
+// get all stock storage
+const getAllStockStorage = async (req, res) => {
+    try {
+        const stock = await StockStorage.findAll();
+        res.status(200).json(stock);
+    } catch (error) {
+        console.error('Error fetching StockStorage:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
 module.exports = {
     updateStockStorage,
-    getStockStorageByItemId
+    getStockStorageByItemId,
+    getAllStockStorage
 };
