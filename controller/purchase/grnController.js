@@ -21,83 +21,56 @@ const createGRN = async (req, res) => {
             return res.status(404).json({ message: 'Purchase Order not found' });
         }
 
-        if (grnItems && grnItems.length > 0) {
-            const orderItemIds = grnItems.map(item => item.orderItemId);
-            const orderItems = await OrderItem.findAll({
-                where: { id: orderItemIds, poId }
-            });
+        const orderItemIds = grnItems.map(item => item.orderItemId);
+        const orderItems = await OrderItem.findAll({ where: { id: orderItemIds, poId } });
 
-            if (orderItems.length !== orderItemIds.length) {
-                const invalidIds = orderItemIds.filter(id => !orderItems.some(item => item.id === id));
-                return res.status(400).json({
-                    message: `OrderItem IDs not found for Purchase Order ${poId}: ${invalidIds.join(', ')}`,
-                });
-            }
-
-            for (const item of grnItems) {
-                const orderItem = orderItems.find(oi => oi.id === item.orderItemId);
-                
-                if (item.receivedQuantity > orderItem.quantity) {
-                    return res.status(400).json({
-                        message: `Received quantity (${item.receivedQuantity}) exceeds ordered quantity (${orderItem.quantity}) for OrderItem ${item.orderItemId}`,
-                    });
-                }
-            }
+        if (orderItems.length !== orderItemIds.length) {
+            const invalidIds = orderItemIds.filter(id => !orderItems.some(item => item.id === id));
+            return res.status(400).json({ message: `OrderItem IDs not found for PO ${poId}: ${invalidIds.join(', ')}` });
         }
 
         const transaction = await sequelize.transaction();
         try {
-            const grn = await GRN.create({
-                poId,
-                grnNo,
-                grnDate,
-                challanNo,
-                challanDate,
-                document,
-                remark,
-            }, { transaction });
+            const grn = await GRN.create({ poId, grnNo, grnDate, challanNo, challanDate, document, remark }, { transaction });
 
-            if (grnItems && grnItems.length > 0) {
-                const orderItemIds = grnItems.map(item => item.orderItemId);
-                const orderItems = await OrderItem.findAll({
-                    where: { id: orderItemIds },
-                    attributes: ['id', 'itemId', 'quantity'], // Fetch `quantity` to calculate rejectedQuantity
+            const grnItemData = await Promise.all(grnItems.map(async (item) => {
+                const orderItem = orderItems.find(oi => oi.id === item.orderItemId);
+                const previousReceived = await GRNItem.sum('receivedQuantity', { where: { orderItemId: item.orderItemId } });
+                const remainingQuantity = orderItem.quantity - (previousReceived || 0);
+                const rejectedQuantity = Math.max(remainingQuantity - item.receivedQuantity, 0);
+
+                return {
+                    grnId: grn.id,
+                    orderItemId: item.orderItemId,
+                    receivedQuantity: item.receivedQuantity,
+                    rejectedQuantity
+                };
+            }));
+
+            await GRNItem.bulkCreate(grnItemData, { transaction });
+
+            // Stock Update (Ensure StockStorage ID remains unchanged)
+            for (const item of grnItemData) {
+                const orderItem = orderItems.find(oi => oi.id === item.orderItemId);
+                const stockRecord = await StockStorage.findOne({
+                    where: { poId, grnId: grn.id, itemId: orderItem.itemId }
                 });
 
-                const grnItemData = grnItems.map(item => {
-                    const orderItem = orderItems.find(oi => oi.id === item.orderItemId);
-                    const rejectedQuantity = Math.max(orderItem.quantity - item.receivedQuantity, 0); // Ensure non-negative
-
-                    return {
-                        grnId: grn.id,
-                        orderItemId: item.orderItemId,
-                        receivedQuantity: item.receivedQuantity,
-                        rejectedQuantity, // Auto-calculated
-                    };
-                });
-
-                await GRNItem.bulkCreate(grnItemData, { transaction });
-
-                const stockData = grnItemData.map(item => {
-                    const orderItem = orderItems.find(oi => oi.id === item.orderItemId);
-                    return {
+                if (stockRecord) {
+                    await stockRecord.update({ quantity: stockRecord.quantity + item.receivedQuantity }, { transaction });
+                } else {
+                    await StockStorage.create({
                         poId,
                         grnId: grn.id,
                         itemId: orderItem.itemId,
                         quantity: item.receivedQuantity,
-                        remark: item.remark || null,
-                    };
-                });
-
-                await StockStorage.bulkCreate(stockData, { transaction });
+                        remark: remark || null
+                    }, { transaction });
+                }
             }
 
             await transaction.commit();
-
-            const createdGRN = await GRN.findByPk(grn.id, {
-                include: [{ model: GRNItem, as: 'grnItems' }],
-            });
-
+            const createdGRN = await GRN.findByPk(grn.id, { include: [{ model: GRNItem, as: 'grnItems' }] });
             res.status(201).json(createdGRN);
         } catch (error) {
             await transaction.rollback();
@@ -108,6 +81,7 @@ const createGRN = async (req, res) => {
         res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
+
 
 
 const updateGRN = async (req, res) => {
@@ -122,72 +96,43 @@ const updateGRN = async (req, res) => {
 
         const transaction = await sequelize.transaction();
         try {
-            // Update GRN details
             await grn.update({ grnNo, grnDate, challanNo, challanDate, document, remark }, { transaction });
 
             if (grnItems && grnItems.length > 0) {
                 const orderItemIds = grnItems.map(item => item.orderItemId);
-                
-                const orderItems = await OrderItem.findAll({
-                    where: { id: orderItemIds },
-                    attributes: ['id', 'itemId', 'quantity']
-                });
+                const orderItems = await OrderItem.findAll({ where: { id: orderItemIds } });
 
-                // Validate receivedQuantity does not exceed ordered quantity
                 for (const item of grnItems) {
                     const orderItem = orderItems.find(oi => oi.id === item.orderItemId);
                     if (!orderItem) {
                         return res.status(400).json({ message: `OrderItem ${item.orderItemId} not found` });
                     }
 
-                    if (item.receivedQuantity > orderItem.quantity) {
-                        return res.status(400).json({
-                            message: `Received quantity (${item.receivedQuantity}) exceeds ordered quantity (${orderItem.quantity}) for OrderItem ${item.orderItemId}`
-                        });
+                    const previousReceived = await GRNItem.sum('receivedQuantity', {
+                        where: { orderItemId: item.orderItemId }
+                    });
+
+                    const remainingQuantity = orderItem.quantity - (previousReceived || 0);
+                    const rejectedQuantity = Math.max(remainingQuantity - item.receivedQuantity, 0);
+
+                    await GRNItem.update(
+                        { receivedQuantity: item.receivedQuantity, rejectedQuantity },
+                        { where: { grnId, orderItemId: item.orderItemId }, transaction }
+                    );
+
+                    // Stock Update (Maintain ID)
+                    const stockRecord = await StockStorage.findOne({
+                        where: { grnId, itemId: orderItem.itemId }
+                    });
+
+                    if (stockRecord) {
+                        await stockRecord.update({ quantity: item.receivedQuantity }, { transaction });
                     }
                 }
-
-                // Delete existing GRN items before adding new ones
-                await GRNItem.destroy({ where: { grnId }, transaction });
-
-                // Insert updated GRN items
-                const grnItemData = grnItems.map(item => {
-                    const orderItem = orderItems.find(oi => oi.id === item.orderItemId);
-                    const rejectedQuantity = Math.max(orderItem.quantity - item.receivedQuantity, 0);
-
-                    return {
-                        grnId: grn.id,
-                        orderItemId: item.orderItemId,
-                        receivedQuantity: item.receivedQuantity,
-                        rejectedQuantity
-                    };
-                });
-
-                await GRNItem.bulkCreate(grnItemData, { transaction });
-
-                // Update Stock Storage
-                await StockStorage.destroy({ where: { grnId }, transaction });
-
-                const stockData = grnItemData.map(item => {
-                    const orderItem = orderItems.find(oi => oi.id === item.orderItemId);
-                    return {
-                        poId: grn.poId,
-                        grnId: grn.id,
-                        itemId: orderItem.itemId,
-                        quantity: item.receivedQuantity,
-                        remark: remark || null
-                    };
-                });
-
-                await StockStorage.bulkCreate(stockData, { transaction });
             }
 
             await transaction.commit();
-
-            const updatedGRN = await GRN.findByPk(grn.id, {
-                include: [{ model: GRNItem, as: 'grnItems' }],
-            });
-
+            const updatedGRN = await GRN.findByPk(grn.id, { include: [{ model: GRNItem, as: 'grnItems' }] });
             res.status(200).json(updatedGRN);
         } catch (error) {
             await transaction.rollback();
