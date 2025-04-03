@@ -20,20 +20,20 @@ router.delete('/:poId/grn/:grnId', GRNController.deleteGRN); // New
 router.get('/:poId/grn/:grnId', GRNController.getGRNById);   // New
 router.get('/:poId/grn', GRNController.getAllGRNs);
 
-// Create a new invoice
-router.post('/invoice/create', invoiceController.createInvoice);
+// // Create a new invoice
+// router.post('/invoice/create', invoiceController.createInvoice);
 
-// Get all invoices
-router.get('/invoices/', invoiceController.getAllInvoices);
+// // Get all invoices
+// router.get('/invoices/', invoiceController.getAllInvoices);
 
-// Get a specific invoice by ID
-router.get('/invoice/:id', invoiceController.getInvoiceById);
+// // Get a specific invoice by ID
+// router.get('/invoice/:id', invoiceController.getInvoiceById);
 
-// Update an invoice
-router.put('/invoice/:id', invoiceController.updateInvoice);
+// // Update an invoice
+// router.put('/invoice/:id', invoiceController.updateInvoice);
 
-// Delete an invoice
-router.delete('/invoice/:id', invoiceController.deleteInvoice);
+// // Delete an invoice
+// router.delete('/invoice/:id', invoiceController.deleteInvoice);
 
 
 
@@ -44,9 +44,9 @@ router.get('/stock/item/:itemId', StockStorageController.getStockStorageByItemId
 router.get('/stock/item', StockStorageController.getAllStockStorage); // New route
 
 
-router.post('/distribution', DistributionController.createDistribution); // New endpoint
-router.get('/distribution/:id', DistributionController.getDistributionById); // New endpoint
-router.delete('/distribution/:id', DistributionController.deleteDistribution); // New endpoint
-router.get('/distributions', DistributionController.getAllDistributions); // New endpoint
+// router.post('/distribution', DistributionController.createDistribution); // New endpoint
+// router.get('/distribution/:id', DistributionController.getDistributionById); // New endpoint
+// router.delete('/distribution/:id', DistributionController.deleteDistribution); // New endpoint
+// router.get('/distributions', DistributionController.getAllDistributions); // New endpoint
 
 module.exports = router;
