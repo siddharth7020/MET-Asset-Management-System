@@ -5,6 +5,7 @@ const purchaseOrderController = require('../controller/purchase/poController');
 const GRNController = require('../controller/purchase/grnController');
 const DistributionController = require('../controller/distribution/DistributionController');
 const StockStorageController = require('../controller/distribution/StockStograge');
+const invoiceController = require('../controller/purchase/invoiceController'); // New import
 
 
 router.post('/', purchaseOrderController.createPurchaseOrder);
@@ -18,6 +19,23 @@ router.put('/:poId/grn/:grnId', GRNController.updateGRN); // New route
 router.delete('/:poId/grn/:grnId', GRNController.deleteGRN); // New
 router.get('/:poId/grn/:grnId', GRNController.getGRNById);   // New
 router.get('/:poId/grn', GRNController.getAllGRNs);
+
+// Create a new invoice
+router.post('/invoice/create', invoiceController.createInvoice);
+
+// Get all invoices
+router.get('/invoices/', invoiceController.getAllInvoices);
+
+// Get a specific invoice by ID
+router.get('/invoice/:id', invoiceController.getInvoiceById);
+
+// Update an invoice
+router.put('/invoice/:id', invoiceController.updateInvoice);
+
+// Delete an invoice
+router.delete('/invoice/:id', invoiceController.deleteInvoice);
+
+
 
 router.post('/:poId/grn/:grnId/stock', StockStorageController.updateStockStorage);
 

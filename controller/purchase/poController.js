@@ -1,8 +1,6 @@
 
 const PurchaseOrder = require('../../models/purchase/PurchaseOrder');
 const OrderItem = require('../../models/purchase/OrderItem');
-const GRN = require('../../models/purchase/GRN');
-const GRNItem = require('../../models/purchase/GRNItem');
 
 // CREATE a new Purchase Order with Order Items
 const createPurchaseOrder = async (req, res) => {
@@ -65,8 +63,7 @@ const getAllPurchaseOrders = async (req, res) => {
     try {
         const purchaseOrders = await PurchaseOrder.findAll({
             include: [
-                { model: OrderItem, as: 'orderItems' },
-                { model: GRN, as: 'grns', include: [{ model: GRNItem, as: 'grnItems' }] }
+                { model: OrderItem, as: 'orderItems' }
             ]
         });
         res.status(200).json(purchaseOrders);
@@ -83,9 +80,9 @@ const getPurchaseOrderById = async (req, res) => {
         const purchaseOrder = await PurchaseOrder.findByPk(poId, {
             include: [
                 { model: OrderItem, as: 'orderItems' },
-                { model: GRN, as: 'grns', include: [{ model: GRNItem, as: 'grnItems' }] }
             ]
         });
+        console.log('Fetching Purchase Order:', purchaseOrder);
 
         if (!purchaseOrder) {
             return res.status(404).json({ message: 'Purchase Order not found' });
@@ -182,15 +179,6 @@ const deletePurchaseOrder = async (req, res) => {
         res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
-
-
-
-
-
-
-
-
-
 
 module.exports = {
     createPurchaseOrder,

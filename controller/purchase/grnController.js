@@ -84,6 +84,7 @@ const createGRN = async (req, res) => {
 
 
 
+
 const updateGRN = async (req, res) => {
     try {
         const { grnId } = req.params;
@@ -143,6 +144,7 @@ const updateGRN = async (req, res) => {
         res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
+
 
 
 
