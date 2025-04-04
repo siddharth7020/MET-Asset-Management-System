@@ -1,180 +1,136 @@
-const Invoice = require('../../models/purchase/invoice');
-const GRN = require('../../models/purchase/GRN');
-const GRNItem = require('../../models/purchase/GRNItem'); // Assuming this exists
-const OrderItem = require('../../models/purchase/OrderItem'); // Assuming this exists
-const { Op } = require('sequelize');
+const Invoice = require('../../models/purchase/invoice'); // Adjust the path as necessary
+const InvoiceItem = require('../../models/purchase/invoiceItem'); // Adjust the path as necessary
+const PurchaseOrder = require('../../models/purchase/PurchaseOrder'); // Adjust the path as necessary
+const OrderItem = require('../../models/purchase/OrderItem'); // Adjust the path as necessary
 
-const invoiceController = {
-    // Create Invoice
-    createInvoice: async (req, res) => {
-        try {
-            const { invoiceNo, grnNos, invoiceDate, paidAmount = 0, paymentDetails, paymentDate } = req.body;
+// Create Invoice
+const createInvoice = async (req, res) => {
+    try {
+        const { poId, invoiceNo, invoiceDate, paymentDetails, items } = req.body;
 
-            // Validate GRNs exist
-            const grns = await GRN.findAll({
-                where: {
-                    grnNo: { [Op.in]: grnNos }
-                },
-                include: [{
-                    model: GRNItem,
-                    as: 'grnItems',
-                    attributes: ['id', 'grnId', 'orderItemId', 'receivedQuantity', 'rejectedQuantity'],
-                    include: [{
-                        model: OrderItem,
-                        as: 'orderItem'
-                    }]
-                }]
-            });
+        // Fetch PO details
+        const purchaseOrder = await PurchaseOrder.findByPk(poId, {
+            include: [{ model: OrderItem, as: 'orderItems' }]
+        });
 
-            if (grns.length !== grnNos.length) {
-                return res.status(400).json({ message: 'One or more GRNs not found' });
-            }
-
-            // Calculate invoice amount
-            let invoiceAmount = 0;
-            grns.forEach(grn => {
-                grn.grnItems.forEach(grnItem => {
-                    invoiceAmount += grnItem.orderItem.totalAmount || (grnItem.orderItem.quantity * grnItem.orderItem.rate);
-                });
-            });
-
-            // Create invoice
-            const invoice = await Invoice.create({
-                invoiceNo,
-                grnNos,
-                invoiceDate,
-                invoiceAmount,
-                paidAmount,
-                paymentDetails,
-                paymentDate
-            });
-
-            // Associate GRNs with invoice
-            await invoice.setGRNs(grns);
-
-            const createdInvoice = await Invoice.findByPk(invoice.id, {
-                include: [GRN]
-            });
-
-            res.status(201).json(createdInvoice);
-        } catch (error) {
-            console.error('Error creating invoice:', error);
-            res.status(500).json({ message: 'Internal server error', error: error.message });
+        if (!purchaseOrder) {
+            return res.status(404).json({ message: 'Purchase Order not found' });
         }
-    },
 
-    // Get All Invoices
-    getAllInvoices: async (req, res) => {
-        try {
-            const invoices = await Invoice.findAll({
-                include: [{
-                    model: GRN,
-                    through: { attributes: [] } // Hide junction table attributes
-                }]
-            });
-            res.status(200).json(invoices);
-        } catch (error) {
-            console.error('Error fetching invoices:', error);
-            res.status(500).json({ message: 'Internal server error', error: error.message });
-        }
-    },
+        // Calculate totals
+        let subtotal = 0;
+        let totalTax = 0;
+        let allItemsTotalAmount = 0;
 
-    // Get Invoice by ID
-    getInvoiceById: async (req, res) => {
-        try {
-            const invoice = await Invoice.findByPk(req.params.id, {
-                include: [{
-                    model: GRN,
-                    include: [{
-                        model: GRNItem,
-                        as: 'grnItems',
-                        include: [{ model: OrderItem, as: 'orderItem' }]
-                    }]
-                }]
-            });
+        const invoiceItems = items.map(item => {
+            const orderItem = purchaseOrder.orderItems.find(oi => oi.id === item.orderItemId);
+            if (!orderItem) throw new Error(`Order Item ${item.orderItemId} not found`);
+            
+            // Base amount before tax (quantity * rate - discount)
+            const amount = orderItem.quantity * orderItem.rate - (orderItem.discount || 0);
+            
+            // Tax percentage (e.g., 18 for 18%)
+            const taxPercentage = item.taxPercentage || 0;
+            
+            // Tax amount = (base amount * tax percentage) / 100
+            const taxAmount = (amount * taxPercentage) / 100;
+            
+            // Total amount = base amount + tax amount
+            const totalAmount = amount + taxAmount;
+            
+            subtotal += amount;
+            totalTax += taxAmount;
+            allItemsTotalAmount += totalAmount;
 
-            if (!invoice) {
-                return res.status(404).json({ message: 'Invoice not found' });
-            }
-            res.status(200).json(invoice);
-        } catch (error) {
-            console.error('Error fetching invoice:', error);
-            res.status(500).json({ message: 'Internal server error', error: error.message });
-        }
-    },
+            return {
+                invoiceId: null, // Will be set after invoice creation
+                orderItemId: item.orderItemId,
+                quantity: orderItem.quantity,
+                rate: orderItem.rate,
+                discount: orderItem.discount,
+                taxPercentage: taxPercentage, // Store 18
+                taxAmount: taxAmount,        // Store computed tax (e.g., 18% of amount)
+                totalAmount: totalAmount     // Store amount + tax
+            };
+        });
 
-    // Update Invoice
-    updateInvoice: async (req, res) => {
-        try {
-            const { invoiceNo, grnNos, invoiceDate, paidAmount, paymentDetails, paymentDate } = req.body;
-            const invoice = await Invoice.findByPk(req.params.id);
+        // Create Invoice
+        const invoice = await Invoice.create({
+            invoiceNo,
+            poId,
+            invoiceDate,
+            subtotal,
+            totalTax,
+            invoiceAmount: subtotal + totalTax,
+            paymentDetails
+        });
 
-            if (!invoice) {
-                return res.status(404).json({ message: 'Invoice not found' });
-            }
+        // Update invoiceItems with invoiceId and create them
+        const invoiceItemData = invoiceItems.map(item => ({
+            ...item,
+            invoiceId: invoice.id
+        }));
+        await InvoiceItem.bulkCreate(invoiceItemData);
 
-            // If GRNs are updated, recalculate invoice amount
-            let invoiceAmount = invoice.invoiceAmount;
-            if (grnNos && grnNos.length > 0) {
-                const grns = await GRN.findAll({
-                    where: { grnNo: { [Op.in]: grnNos } },
-                    include: [{
-                        model: GRNItem,
-                        as: 'grnItems',
-                        include: [{ model: OrderItem, as: 'orderItem' }]
-                    }]
-                });
+        // Fetch complete invoice with all items total
+        const createdInvoice = await Invoice.findByPk(invoice.id, {
+            include: [{ model: InvoiceItem, as: 'items' }]
+        });
 
-                if (grns.length !== grnNos.length) {
-                    return res.status(400).json({ message: 'One or more GRNs not found' });
-                }
+        // Add allItemsTotalAmount to response
+        const response = {
+            ...createdInvoice.toJSON(),
+            allItemsTotalAmount: allItemsTotalAmount
+        };
 
-                invoiceAmount = 0;
-                grns.forEach(grn => {
-                    grn.grnItems.forEach(grnItem => {
-                        invoiceAmount += grnItem.orderItem.totalAmount || (grnItem.orderItem.quantity * grnItem.orderItem.rate);
-                    });
-                });
-
-                await invoice.setGRNs(grns);
-            }
-
-            // Update invoice
-            await invoice.update({
-                invoiceNo: invoiceNo || invoice.invoiceNo,
-                grnNos: grnNos || invoice.grnNos,
-                invoiceDate: invoiceDate || invoice.invoiceDate,
-                invoiceAmount,
-                paidAmount: paidAmount !== undefined ? paidAmount : invoice.paidAmount,
-                paymentDetails: paymentDetails !== undefined ? paymentDetails : invoice.paymentDetails,
-                paymentDate: paymentDate !== undefined ? paymentDate : invoice.paymentDate
-            });
-
-            const updatedInvoice = await Invoice.findByPk(req.params.id, {
-                include: [GRN]
-            });
-            res.status(200).json(updatedInvoice);
-        } catch (error) {
-            console.error('Error updating invoice:', error);
-            res.status(500).json({ message: 'Internal server error', error: error.message });
-        }
-    },
-
-    // Delete Invoice
-    deleteInvoice: async (req, res) => {
-        try {
-            const invoice = await Invoice.findByPk(req.params.id);
-            if (!invoice) {
-                return res.status(404).json({ message: 'Invoice not found' });
-            }
-
-            await invoice.destroy();
-            res.status(200).json({ message: 'Invoice deleted successfully' });
-        } catch (error) {
-            console.error('Error deleting invoice:', error);
-            res.status(500).json({ message: 'Internal server error', error: error.message });
-        }
+        res.status(201).json(response);
+    } catch (error) {
+        console.error('Error creating invoice:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
 
-module.exports = invoiceController;
+// Get Invoice by ID (unchanged from previous)
+const getInvoice = async (req, res) => {
+    try {
+        const invoice = await Invoice.findByPk(req.params.id, {
+            include: [
+                { model: PurchaseOrder, as: 'purchaseOrder' },
+                { model: InvoiceItem, as: 'items', include: [{ model: OrderItem, as: 'orderItem' }] }
+            ]
+        });
+
+        if (!invoice) return res.status(404).json({ message: 'Invoice not found' });
+
+        const allItemsTotalAmount = invoice.items.reduce((sum, item) => sum + Number(item.totalAmount), 0);
+
+        const response = {
+            ...invoice.toJSON(),
+            allItemsTotalAmount: allItemsTotalAmount
+        };
+
+        res.json(response);
+    } catch (error) {
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+// Get PO details for Invoice creation (unchanged)
+const getPODetailsForInvoice = async (req, res) => {
+    try {
+        const poId = req.params.poId;
+        const purchaseOrder = await PurchaseOrder.findByPk(poId, {
+            include: [{ model: OrderItem, as: 'orderItems' }]
+        });
+        
+        if (!purchaseOrder) {
+            return res.status(404).json({ message: 'Purchase Order not found' });
+        }
+        
+        res.json(purchaseOrder);
+    } catch (error) {
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+module.exports = { createInvoice, getInvoice, getPODetailsForInvoice };

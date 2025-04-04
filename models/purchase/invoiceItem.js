@@ -1,46 +1,49 @@
+// invoiceItem.js
 const { DataTypes } = require('sequelize');
 const sequelize = require('../../config/database');
 
-const OrderItem = sequelize.define('OrderItem', {
+const InvoiceItem = sequelize.define('InvoiceItem', {
     id: {
         type: DataTypes.INTEGER,
         autoIncrement: true,
         primaryKey: true
     },
-    poId: {
+    invoiceId: {
         type: DataTypes.INTEGER,
         allowNull: false
     },
-    itemId: {
+    orderItemId: {
         type: DataTypes.INTEGER,
         allowNull: false
     },
     quantity: {
         type: DataTypes.INTEGER,
-        allowNull: false,
-        validate: { min: 0 } // Ensure non-negative
+        allowNull: false
     },
     rate: {
-        type: DataTypes.DECIMAL(10, 2),
-        allowNull: false,
-        validate: { min: 0 }
-    },
-    amount: {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false
     },
     discount: {
         type: DataTypes.DECIMAL(10, 2),
+        defaultValue: 0.00
+    },
+    taxPercentage: {
+        type: DataTypes.DECIMAL(5, 2), // e.g., 12.50 for 12.5%
         defaultValue: 0.00,
-        validate: { min: 0 }
+        validate: { min: 0, max: 100 } // Restrict to valid percentage range
+    },
+    taxAmount: {
+        type: DataTypes.DECIMAL(10, 2), // Computed tax amount
+        defaultValue: 0.00
     },
     totalAmount: {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false
     }
 }, {
-    tableName: 'order_item',
+    tableName: 'invoice_items',
     timestamps: true
 });
 
-module.exports = OrderItem;
+module.exports = InvoiceItem;

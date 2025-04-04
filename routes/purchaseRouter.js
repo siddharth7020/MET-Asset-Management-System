@@ -35,6 +35,10 @@ router.get('/:poId/grn', GRNController.getAllGRNs);
 // // Delete an invoice
 // router.delete('/invoice/:id', invoiceController.deleteInvoice);
 
+router.post('/invoice/create', invoiceController.createInvoice);
+router.get('/invoices/:id', invoiceController.getInvoice);
+router.get('/po-details/:poId', invoiceController.getPODetailsForInvoice);
+
 
 
 router.post('/:poId/grn/:grnId/stock', StockStorageController.updateStockStorage);
@@ -44,9 +48,9 @@ router.get('/stock/item/:itemId', StockStorageController.getStockStorageByItemId
 router.get('/stock/item', StockStorageController.getAllStockStorage); // New route
 
 
-// router.post('/distribution', DistributionController.createDistribution); // New endpoint
-// router.get('/distribution/:id', DistributionController.getDistributionById); // New endpoint
-// router.delete('/distribution/:id', DistributionController.deleteDistribution); // New endpoint
-// router.get('/distributions', DistributionController.getAllDistributions); // New endpoint
+router.post('/distribution', DistributionController.createDistribution); // New endpoint
+router.get('/distribution/:id', DistributionController.getDistributionById); // New endpoint
+router.delete('/distribution/:id', DistributionController.deleteDistribution); // New endpoint
+router.get('/distributions', DistributionController.getAllDistributions); // New endpoint
 
 module.exports = router;

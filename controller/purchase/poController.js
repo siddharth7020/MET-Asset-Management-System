@@ -14,7 +14,7 @@ const createPurchaseOrder = async (req, res) => {
             document,
             requestedBy,
             remark,
-            orderItems // Array of { itemId, quantity, rate, discount, tax1, tax2 }
+            orderItems // Array of { itemId, quantity, rate, discount }
         } = req.body;
 
         // Create Purchase Order
@@ -38,10 +38,7 @@ const createPurchaseOrder = async (req, res) => {
                 rate: item.rate,
                 amount: item.quantity * item.rate,
                 discount: item.discount || 0,
-                tax1: item.tax1 || 0,
-                tax2: item.tax2 || 0,
-                totalTax: (item.tax1 || 0) + (item.tax2 || 0),
-                totalAmount: (item.quantity * item.rate) - (item.discount || 0) + ((item.tax1 || 0) + (item.tax2 || 0))
+                totalAmount: (item.quantity * item.rate) - (item.discount || 0)
             }));
             await OrderItem.bulkCreate(orderItemData);
         }
@@ -141,10 +138,7 @@ const updatePurchaseOrder = async (req, res) => {
                 rate: item.rate,
                 amount: item.quantity * item.rate,
                 discount: item.discount || 0,
-                tax1: item.tax1 || 0,
-                tax2: item.tax2 || 0,
-                totalTax: (item.tax1 || 0) + (item.tax2 || 0),
-                totalAmount: (item.quantity * item.rate) - (item.discount || 0) + ((item.tax1 || 0) + (item.tax2 || 0))
+                totalAmount: (item.quantity * item.rate) - (item.discount || 0)
             }));
             await OrderItem.bulkCreate(orderItemData);
         }
