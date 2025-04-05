@@ -9,7 +9,9 @@ const DistributionItem = require('../../models/distribution/DistributionItem');
 const FinancialYear = require('../../models/master/financialYear');
 const Institute = require('../../models/master/institute');
 const Invoice = require('../purchase/invoice');
-const InvoiceItem = require('../purchase/invoiceItem'); 
+const InvoiceItem = require('../purchase/invoiceItem');
+const QuickGRN = require('../purchase/quickGRN');
+const QuickGRNItem = require('../purchase/quickGRNItem');
 
 const defineAssociations = () => {
     // PurchaseOrder Associations
@@ -29,6 +31,16 @@ const defineAssociations = () => {
     // GRNItem Associations
     GRNItem.belongsTo(GRN, { foreignKey: 'grnId', as: 'grn' });
     GRNItem.belongsTo(OrderItem, { foreignKey: 'orderItemId', as: 'orderItem' });
+
+    //Quick GRN Associations
+    QuickGRN.hasMany(QuickGRNItem, { foreignKey: 'qGRNId', as: 'items' });
+    QuickGRNItem.belongsTo(QuickGRN, { foreignKey: 'qGRNId', as: 'quickGRN' });
+    
+    //Quick GRN Item Associations
+    // QuickGRNItem.belongsTo(QuickGRN, { foreignKey: 'qGRNId', as: 'quickGRN' });
+    // QuickGRNItem.belongsTo(Item, { foreignKey: 'itemId', as: 'item' });
+    // QuickGRNItem.belongsTo(StockStorage, { foreignKey: 'stockStorageId', as: 'stockStorage' });
+
 
     //invoice Associations
     PurchaseOrder.hasMany(Invoice, { foreignKey: 'poId', as: 'invoices' });
