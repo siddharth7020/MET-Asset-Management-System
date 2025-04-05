@@ -9,11 +9,15 @@ const StockStorage = sequelize.define('StockStorage', {
     },
     poId: {
         type: DataTypes.INTEGER,
-        allowNull: false
+        allowNull: true // Make nullable for QuickGRN
     },
     grnId: {
         type: DataTypes.INTEGER,
-        allowNull: false
+        allowNull: true // Make nullable for QuickGRN
+    },
+    qGRNId: {
+        type: DataTypes.INTEGER,
+        allowNull: true // Make nullable for normal GRN
     },
     itemId: {
         type: DataTypes.INTEGER,
