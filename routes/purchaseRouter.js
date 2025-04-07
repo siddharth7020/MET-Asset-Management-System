@@ -27,6 +27,10 @@ router.get('/po-details/:poId', invoiceController.getPODetailsForInvoice);
 
 // New route for QuickGRN
 router.post('/quickgrn/create', QuickGRNController.createQuickGRN); // New route
+router.get('/quickgrn/all', QuickGRNController.getAllQuickGRNs); // New route
+router.get('/quickgrn/:id', QuickGRNController.getQuickGRNById); // New route
+router.put('/quickgrn/:id', QuickGRNController.updateQuickGRN); // New route
+router.delete('/quickgrn/delete/:id', QuickGRNController.deleteQuickGRN); // New route
 
 router.post('/:poId/grn/:grnId/stock', StockStorageController.updateStockStorage);
 router.get('/stock/item/:itemId', StockStorageController.getStockStorageByItemId);
