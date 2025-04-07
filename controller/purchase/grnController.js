@@ -118,52 +118,106 @@ const createGRN = async (req, res) => {
 const updateGRN = async (req, res) => {
     try {
         const { grnId } = req.params;
-        const { grnNo, grnDate, challanNo, challanDate, document, remark, grnItems } = req.body;
+        const {
+            grnNo,
+            grnDate,
+            challanNo,
+            challanDate,
+            document,
+            remark,
+            grnItems // Array of { id (grnItemId), orderItemId, receivedQuantity }
+        } = req.body;
 
         const grn = await GRN.findByPk(grnId);
-        if (!grn) {
-            return res.status(404).json({ message: 'GRN not found' });
-        }
+        if (!grn) return res.status(404).json({ message: 'GRN not found' });
 
         const transaction = await sequelize.transaction();
         try {
-            await grn.update({ grnNo, grnDate, challanNo, challanDate, document, remark }, { transaction });
+            // Update GRN main data
+            await grn.update({
+                grnNo,
+                grnDate,
+                challanNo,
+                challanDate,
+                document,
+                remark
+            }, { transaction });
 
-            if (grnItems && grnItems.length > 0) {
-                const orderItemIds = grnItems.map(item => item.orderItemId);
-                const orderItems = await OrderItem.findAll({ where: { id: orderItemIds } });
+            // Fetch existing GRN items
+            const existingGRNItems = await GRNItem.findAll({
+                where: { grnId },
+                transaction
+            });
 
-                for (const item of grnItems) {
-                    const orderItem = orderItems.find(oi => oi.id === item.orderItemId);
-                    if (!orderItem) {
-                        return res.status(400).json({ message: `OrderItem ${item.orderItemId} not found` });
-                    }
-
-                    const previousReceived = await GRNItem.sum('receivedQuantity', {
-                        where: { orderItemId: item.orderItemId }
+            // Rollback StockStorage quantities
+            for (const item of existingGRNItems) {
+                const orderItem = await OrderItem.findByPk(item.orderItemId);
+                if (orderItem) {
+                    const stock = await StockStorage.findOne({
+                        where: { grnId: grn.id, itemId: orderItem.itemId },
+                        transaction
                     });
-
-                    const remainingQuantity = orderItem.quantity - (previousReceived || 0);
-                    const rejectedQuantity = Math.max(remainingQuantity - item.receivedQuantity, 0);
-
-                    await GRNItem.update(
-                        { receivedQuantity: item.receivedQuantity, rejectedQuantity },
-                        { where: { grnId, orderItemId: item.orderItemId }, transaction }
-                    );
-
-                    // Stock Update (Maintain ID)
-                    const stockRecord = await StockStorage.findOne({
-                        where: { grnId, itemId: orderItem.itemId }
-                    });
-
-                    if (stockRecord) {
-                        await stockRecord.update({ quantity: item.receivedQuantity }, { transaction });
+                    if (stock) {
+                        stock.quantity -= item.receivedQuantity;
+                        await stock.save({ transaction });
                     }
                 }
             }
 
+            // Delete old GRN items
+            await GRNItem.destroy({ where: { grnId }, transaction });
+
+            // Add new GRN items
+            const newGRNItems = await Promise.all(grnItems.map(async item => {
+                const orderItem = await OrderItem.findByPk(item.orderItemId);
+                const prevReceived = await GRNItem.sum('receivedQuantity', {
+                    where: { orderItemId: item.orderItemId },
+                    transaction
+                });
+
+                const remaining = orderItem.quantity - (prevReceived || 0);
+                const rejectedQuantity = Math.max(remaining - item.receivedQuantity, 0);
+
+                return {
+                    grnId,
+                    orderItemId: item.orderItemId,
+                    receivedQuantity: item.receivedQuantity,
+                    rejectedQuantity
+                };
+            }));
+
+            await GRNItem.bulkCreate(newGRNItems, { transaction });
+
+            // Update StockStorage again
+            for (const item of newGRNItems) {
+                const orderItem = await OrderItem.findByPk(item.orderItemId);
+                let stock = await StockStorage.findOne({
+                    where: { grnId, itemId: orderItem.itemId },
+                    transaction
+                });
+
+                if (stock) {
+                    stock.quantity += item.receivedQuantity;
+                    stock.remark = remark || stock.remark;
+                    await stock.save({ transaction });
+                } else {
+                    await StockStorage.create({
+                        poId: grn.poId,
+                        grnId,
+                        qGRNId: null,
+                        itemId: orderItem.itemId,
+                        quantity: item.receivedQuantity,
+                        remark: remark || null
+                    }, { transaction });
+                }
+            }
+
             await transaction.commit();
-            const updatedGRN = await GRN.findByPk(grn.id, { include: [{ model: GRNItem, as: 'grnItems' }] });
+
+            const updatedGRN = await GRN.findByPk(grnId, {
+                include: [{ model: GRNItem, as: 'grnItems' }]
+            });
+
             res.status(200).json(updatedGRN);
         } catch (error) {
             await transaction.rollback();
@@ -179,27 +233,60 @@ const updateGRN = async (req, res) => {
 
 
 
+
 // DELETE a GRN
 const deleteGRN = async (req, res) => {
     try {
-        const { poId, grnId } = req.params;
+        const { grnId } = req.params;
 
-        // Check if PurchaseOrder exists
-        const purchaseOrder = await PurchaseOrder.findByPk(poId);
-        if (!purchaseOrder) {
-            return res.status(404).json({ message: 'Purchase Order not found' });
-        }
-
-        // Check if GRN exists
-        const grn = await GRN.findOne({ where: { id: grnId, poId } });
+        const grn = await GRN.findByPk(grnId);
         if (!grn) {
-            return res.status(404).json({ message: 'GRN not found for this Purchase Order' });
+            return res.status(404).json({ message: 'GRN not found' });
         }
 
-        // Delete GRN (GRNItems will be deleted via cascade if configured, or manually)
-        await grn.destroy();
+        const transaction = await sequelize.transaction();
+        try {
+            const grnItems = await GRNItem.findAll({ where: { grnId }, transaction });
 
-        res.status(200).json({ message: 'GRN deleted successfully' });
+            // Update stock quantities before deleting
+            for (const item of grnItems) {
+                const orderItem = await OrderItem.findByPk(item.orderItemId, { transaction });
+
+                if (orderItem) {
+                    const stock = await StockStorage.findOne({
+                        where: {
+                            grnId: grn.id,
+                            itemId: orderItem.itemId
+                        },
+                        transaction
+                    });
+
+                    if (stock) {
+                        // Subtract the received quantity from stock
+                        stock.quantity -= item.receivedQuantity;
+
+                        // If quantity is 0 or less, delete the stock record
+                        if (stock.quantity <= 0) {
+                            await stock.destroy({ transaction });
+                        } else {
+                            await stock.save({ transaction });
+                        }
+                    }
+                }
+            }
+
+            // Delete GRNItems
+            await GRNItem.destroy({ where: { grnId }, transaction });
+
+            // Delete GRN
+            await grn.destroy({ transaction });
+
+            await transaction.commit();
+            res.status(200).json({ message: 'GRN and associated stock deleted successfully' });
+        } catch (error) {
+            await transaction.rollback();
+            throw error;
+        }
     } catch (error) {
         console.error('Error deleting GRN:', error);
         res.status(500).json({ message: 'Internal server error', error: error.message });
