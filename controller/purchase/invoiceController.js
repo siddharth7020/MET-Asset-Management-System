@@ -95,8 +95,8 @@ const getInvoice = async (req, res) => {
     try {
         const invoice = await Invoice.findByPk(req.params.id, {
             include: [
-                { model: PurchaseOrder, as: 'purchaseOrder' },
-                { model: InvoiceItem, as: 'items', include: [{ model: OrderItem, as: 'orderItem' }] }
+                { model: PurchaseOrder, as: 'PurchaseOrder' },
+                { model: InvoiceItem, as: 'items', include: [{ model: OrderItem, as: 'OrderItem' }] }
             ]
         });
 

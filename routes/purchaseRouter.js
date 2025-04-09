@@ -7,6 +7,7 @@ const DistributionController = require('../controller/distribution/DistributionC
 const StockStorageController = require('../controller/distribution/StockStograge');
 const invoiceController = require('../controller/purchase/invoiceController'); // New import
 const QuickGRNController = require('../controller/purchase/quickGRNController'); // New import
+const QuickInvoiceController = require('../controller/purchase/quickInvoiceController'); // New import
 
 
 router.post('/', purchaseOrderController.createPurchaseOrder);
@@ -31,6 +32,9 @@ router.get('/quickgrn/all', QuickGRNController.getAllQuickGRNs); // New route
 router.get('/quickgrn/:id', QuickGRNController.getQuickGRNById); // New route
 router.put('/quickgrn/:id', QuickGRNController.updateQuickGRN); // New route
 router.delete('/quickgrn/delete/:id', QuickGRNController.deleteQuickGRN); // New route
+
+//quick invoice routes
+router.post('/quickinvoice/create', QuickInvoiceController.createQuickInvoice); // New route
 
 router.post('/:poId/grn/:grnId/stock', StockStorageController.updateStockStorage);
 router.get('/stock/item/:itemId', StockStorageController.getStockStorageByItemId);

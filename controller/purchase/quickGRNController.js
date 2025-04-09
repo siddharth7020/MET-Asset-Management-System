@@ -102,6 +102,17 @@ const createQuickGRN = async (req, res) => {
     }
 };
 
+const getAllQuickGRNs = async (req, res) => {
+    try {
+        const quickGRNs = await QuickGRN.findAll();
+
+        res.status(200).json(quickGRNs);
+    } catch (error) {
+        console.error('Error fetching Quick GRNs:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
 
 
 const getQuickGRNById = async (req, res) => {
@@ -122,16 +133,7 @@ const getQuickGRNById = async (req, res) => {
     }
 };
 
-const getAllQuickGRNs = async (req, res) => {
-    try {
-        const quickGRNs = await QuickGRN.findAll();
 
-        res.status(200).json(quickGRNs);
-    } catch (error) {
-        console.error('Error fetching Quick GRNs:', error);
-        res.status(500).json({ message: 'Internal server error', error: error.message });
-    }
-};
 
 
 const updateQuickGRN = async (req, res) => {
