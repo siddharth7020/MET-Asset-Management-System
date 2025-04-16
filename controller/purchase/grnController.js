@@ -4,6 +4,7 @@ const PurchaseOrder = require('../../models/purchase/PurchaseOrder');
 const OrderItem = require('../../models/purchase/OrderItem');
 const StockStorage = require('../../models/distribution/stockStorage');
 const sequelize = require('../../config/database');
+const { Op } = require('sequelize');
 
 
 // Create GRN with Items and Stock Storage
@@ -125,97 +126,210 @@ const updateGRN = async (req, res) => {
             challanDate,
             document,
             remark,
-            grnItems // Array of { id (grnItemId), orderItemId, receivedQuantity }
+            grnItems // Array of { id (optional for new items), orderItemId, receivedQuantity, rejectedQuantity (optional) }
         } = req.body;
 
-        const grn = await GRN.findByPk(grnId);
-        if (!grn) return res.status(404).json({ message: 'GRN not found' });
+        // Find the GRN
+        const grn = await GRN.findByPk(grnId, {
+            include: [{ model: GRNItem, as: 'grnItems' }],
+        });
+        if (!grn) {
+            return res.status(404).json({ message: 'GRN not found' });
+        }
 
+        // Start a transaction
         const transaction = await sequelize.transaction();
         try {
-            // Update GRN main data
-            await grn.update({
-                grnNo,
-                grnDate,
-                challanNo,
-                challanDate,
-                document,
-                remark
-            }, { transaction });
+            // Update GRN main data (only update provided fields)
+            await grn.update(
+                {
+                    grnNo: grnNo ?? grn.grnNo,
+                    grnDate: grnDate ?? grn.grnDate,
+                    challanNo: challanNo ?? grn.challanNo,
+                    challanDate: challanDate ?? grn.challanDate,
+                    document: document !== undefined ? document : grn.document,
+                    remark: remark !== undefined ? remark : grn.remark,
+                },
+                { transaction }
+            );
 
-            // Fetch existing GRN items
-            const existingGRNItems = await GRNItem.findAll({
-                where: { grnId },
-                transaction
-            });
+            // Handle GRN Items
+            if (grnItems && grnItems.length > 0) {
+                // Get existing GRNItem IDs
+                const existingGRNItemIds = grn.grnItems.map((item) => item.id);
+                const providedGRNItemIds = grnItems
+                    .filter((item) => item.id)
+                    .map((item) => item.id);
 
-            // Rollback StockStorage quantities
-            for (const item of existingGRNItems) {
-                const orderItem = await OrderItem.findByPk(item.orderItemId);
-                if (orderItem) {
-                    const stock = await StockStorage.findOne({
-                        where: { grnId: grn.id, itemId: orderItem.itemId },
-                        transaction
+                // Delete GRNItems that are not in the updated list
+                const grnItemsToDelete = existingGRNItemIds.filter(
+                    (id) => !providedGRNItemIds.includes(id)
+                );
+                if (grnItemsToDelete.length > 0) {
+                    // Adjust StockStorage for deleted GRNItems
+                    const deletedGRNItems = grn.grnItems.filter((item) =>
+                        grnItemsToDelete.includes(item.id)
+                    );
+                    for (const item of deletedGRNItems) {
+                        const orderItem = await OrderItem.findByPk(item.orderItemId, { transaction });
+                        if (orderItem) {
+                            const stock = await StockStorage.findOne({
+                                where: { grnId: grn.id, itemId: orderItem.itemId },
+                                transaction,
+                            });
+                            if (stock) {
+                                stock.quantity -= item.receivedQuantity;
+                                if (stock.quantity <= 0) {
+                                    await stock.destroy({ transaction });
+                                } else {
+                                    await stock.save({ transaction });
+                                }
+                            }
+                        }
+                    }
+                    // Delete the GRNItems
+                    await GRNItem.destroy({
+                        where: { id: grnItemsToDelete },
+                        transaction,
                     });
-                    if (stock) {
-                        stock.quantity -= item.receivedQuantity;
-                        await stock.save({ transaction });
+                }
+
+                // Process each GRNItem
+                for (const item of grnItems) {
+                    // Validate orderItemId
+                    const orderItem = await OrderItem.findByPk(item.orderItemId, { transaction });
+                    if (!orderItem || orderItem.poId !== grn.poId) {
+                        await transaction.rollback();
+                        return res.status(400).json({
+                            message: `Invalid orderItemId: ${item.orderItemId} does not belong to poId: ${grn.poId}`,
+                        });
+                    }
+
+                    // Calculate remaining quantity
+                    const prevReceived = await GRNItem.sum('receivedQuantity', {
+                        where: { orderItemId: item.orderItemId, id: { [Op.ne]: item.id || 0 } }, // Fixed: Use Op.ne
+                        transaction,
+                    });
+                    const remainingQuantity = orderItem.quantity - (prevReceived || 0);
+                    if (item.receivedQuantity > remainingQuantity) {
+                        await transaction.rollback();
+                        return res.status(400).json({
+                            message: `Received quantity (${item.receivedQuantity}) exceeds remaining quantity (${remainingQuantity}) for orderItemId: ${item.orderItemId}`,
+                        });
+                    }
+
+                    const rejectedQuantity =
+                        item.rejectedQuantity !== undefined
+                            ? item.rejectedQuantity
+                            : Math.max(remainingQuantity - item.receivedQuantity, 0);
+
+                    const grnItemData = {
+                        grnId: grn.id,
+                        orderItemId: item.orderItemId,
+                        receivedQuantity: item.receivedQuantity,
+                        rejectedQuantity,
+                    };
+
+                    if (item.id) {
+                        // Update existing GRNItem
+                        const existingGRNItem = grn.grnItems.find((gi) => gi.id === item.id);
+                        if (!existingGRNItem) {
+                            await transaction.rollback();
+                            return res.status(400).json({
+                                message: `GRNItem with id: ${item.id} not found for grnId: ${grnId}`,
+                            });
+                        }
+
+                        // Adjust StockStorage for the change in receivedQuantity
+                        const quantityDifference = item.receivedQuantity - existingGRNItem.receivedQuantity;
+                        if (quantityDifference !== 0) {
+                            const stock = await StockStorage.findOne({
+                                where: { grnId: grn.id, itemId: orderItem.itemId },
+                                transaction,
+                            });
+                            if (stock) {
+                                stock.quantity += quantityDifference;
+                                stock.remark = remark || stock.remark;
+                                if (stock.quantity <= 0) {
+                                    await stock.destroy({ transaction });
+                                } else {
+                                    await stock.save({ transaction });
+                                }
+                            } else if (quantityDifference > 0) {
+                                await StockStorage.create(
+                                    {
+                                        poId: grn.poId,
+                                        grnId: grn.id,
+                                        qGRNId: null,
+                                        itemId: orderItem.itemId,
+                                        quantity: quantityDifference,
+                                        remark: remark || null,
+                                    },
+                                    { transaction }
+                                );
+                            }
+                        }
+
+                        // Update GRNItem
+                        await GRNItem.update(grnItemData, {
+                            where: { id: item.id, grnId: grn.id },
+                            transaction,
+                        });
+                    } else {
+                        // Create new GRNItem
+                        const newGRNItem = await GRNItem.create(grnItemData, { transaction });
+
+                        // Update StockStorage for new GRNItem
+                        const stock = await StockStorage.findOne({
+                            where: { grnId: grn.id, itemId: orderItem.itemId },
+                            transaction,
+                        });
+                        if (stock) {
+                            stock.quantity += item.receivedQuantity;
+                            stock.remark = remark || stock.remark;
+                            await stock.save({ transaction });
+                        } else {
+                            await StockStorage.create(
+                                {
+                                    poId: grn.poId,
+                                    grnId: grn.id,
+                                    qGRNId: null,
+                                    itemId: orderItem.itemId,
+                                    quantity: item.receivedQuantity,
+                                    remark: remark || null,
+                                },
+                                { transaction }
+                            );
+                        }
                     }
                 }
-            }
-
-            // Delete old GRN items
-            await GRNItem.destroy({ where: { grnId }, transaction });
-
-            // Add new GRN items
-            const newGRNItems = await Promise.all(grnItems.map(async item => {
-                const orderItem = await OrderItem.findByPk(item.orderItemId);
-                const prevReceived = await GRNItem.sum('receivedQuantity', {
-                    where: { orderItemId: item.orderItemId },
-                    transaction
-                });
-
-                const remaining = orderItem.quantity - (prevReceived || 0);
-                const rejectedQuantity = Math.max(remaining - item.receivedQuantity, 0);
-
-                return {
-                    grnId,
-                    orderItemId: item.orderItemId,
-                    receivedQuantity: item.receivedQuantity,
-                    rejectedQuantity
-                };
-            }));
-
-            await GRNItem.bulkCreate(newGRNItems, { transaction });
-
-            // Update StockStorage again
-            for (const item of newGRNItems) {
-                const orderItem = await OrderItem.findByPk(item.orderItemId);
-                let stock = await StockStorage.findOne({
-                    where: { grnId, itemId: orderItem.itemId },
-                    transaction
-                });
-
-                if (stock) {
-                    stock.quantity += item.receivedQuantity;
-                    stock.remark = remark || stock.remark;
-                    await stock.save({ transaction });
-                } else {
-                    await StockStorage.create({
-                        poId: grn.poId,
-                        grnId,
-                        qGRNId: null,
-                        itemId: orderItem.itemId,
-                        quantity: item.receivedQuantity,
-                        remark: remark || null
-                    }, { transaction });
+            } else {
+                // If no grnItems provided, delete all existing GRNItems and adjust StockStorage
+                for (const item of grn.grnItems) {
+                    const orderItem = await OrderItem.findByPk(item.orderItemId, { transaction });
+                    if (orderItem) {
+                        const stock = await StockStorage.findOne({
+                            where: { grnId: grn.id, itemId: orderItem.itemId },
+                            transaction,
+                        });
+                        if (stock) {
+                            stock.quantity -= item.receivedQuantity;
+                            if (stock.quantity <= 0) {
+                                await stock.destroy({ transaction });
+                            } else {
+                                await stock.save({ transaction });
+                            }
+                        }
+                    }
                 }
+                await GRNItem.destroy({ where: { grnId }, transaction });
             }
 
             await transaction.commit();
 
+            // Fetch the updated GRN with its items
             const updatedGRN = await GRN.findByPk(grnId, {
-                include: [{ model: GRNItem, as: 'grnItems' }]
+                include: [{ model: GRNItem, as: 'grnItems' }],
             });
 
             res.status(200).json(updatedGRN);
@@ -228,11 +342,6 @@ const updateGRN = async (req, res) => {
         res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
-
-
-
-
-
 
 // DELETE a GRN
 const deleteGRN = async (req, res) => {
