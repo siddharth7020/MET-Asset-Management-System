@@ -1,6 +1,7 @@
 
 const PurchaseOrder = require('../../models/purchase/PurchaseOrder');
 const OrderItem = require('../../models/purchase/OrderItem');
+const sequelize = require('../../config/database');
 
 // CREATE a new Purchase Order with Order Items
 const createPurchaseOrder = async (req, res) => {
@@ -94,6 +95,7 @@ const getPurchaseOrderById = async (req, res) => {
 
 // UPDATE a Purchase Order
 const updatePurchaseOrder = async (req, res) => {
+    const t = await sequelize.transaction(); // Start a transaction
     try {
         const { poId } = req.params;
         const {
@@ -105,51 +107,81 @@ const updatePurchaseOrder = async (req, res) => {
             document,
             requestedBy,
             remark,
-            orderItems // Updated array of Order Items
+            orderItems
         } = req.body;
 
-        const purchaseOrder = await PurchaseOrder.findByPk(poId);
+        const purchaseOrder = await PurchaseOrder.findByPk(poId, {
+            include: [{ model: OrderItem, as: 'orderItems' }],
+            transaction: t,
+        });
         if (!purchaseOrder) {
+            await t.rollback();
             return res.status(404).json({ message: 'Purchase Order not found' });
         }
 
-        // Update Purchase Order details
-        await purchaseOrder.update({
-            poDate,
-            poNo,
-            instituteId,
-            financialYearId,
-            vendorId,
-            document,
-            requestedBy,
-            remark
-        });
+        await purchaseOrder.update(
+            {
+                poDate,
+                poNo,
+                instituteId,
+                financialYearId,
+                vendorId,
+                document,
+                requestedBy,
+                remark,
+            },
+            { transaction: t }
+        );
 
-        // Update or recreate Order Items
         if (orderItems && orderItems.length > 0) {
-            // Delete existing Order Items
-            await OrderItem.destroy({ where: { poId } });
+            const existingOrderItemIds = purchaseOrder.orderItems.map((item) => item.id);
+            const newOrderItemIds = orderItems
+                .filter((item) => item.id)
+                .map((item) => item.id);
 
-            // Create new Order Items
-            const orderItemData = orderItems.map(item => ({
-                poId: purchaseOrder.poId,
-                itemId: item.itemId,
-                quantity: item.quantity,
-                rate: item.rate,
-                amount: item.quantity * item.rate,
-                discount: item.discount || 0,
-                totalAmount: (item.quantity * item.rate) - (item.discount || 0)
-            }));
-            await OrderItem.bulkCreate(orderItemData);
+            const orderItemsToDelete = existingOrderItemIds.filter(
+                (id) => !newOrderItemIds.includes(id)
+            );
+            if (orderItemsToDelete.length > 0) {
+                await OrderItem.destroy({
+                    where: { id: orderItemsToDelete },
+                    transaction: t,
+                });
+            }
+
+            for (const item of orderItems) {
+                const orderItemData = {
+                    poId: purchaseOrder.poId,
+                    itemId: item.itemId,
+                    quantity: item.quantity,
+                    rate: item.rate,
+                    amount: item.quantity * item.rate,
+                    discount: item.discount || 0,
+                    totalAmount: (item.quantity * item.rate) - (item.discount || 0),
+                };
+
+                if (item.id) {
+                    await OrderItem.update(orderItemData, {
+                        where: { id: item.id, poId: purchaseOrder.poId },
+                        transaction: t,
+                    });
+                } else {
+                    await OrderItem.create(orderItemData, { transaction: t });
+                }
+            }
+        } else {
+            await OrderItem.destroy({ where: { poId }, transaction: t });
         }
 
-        // Fetch updated Purchase Order
         const updatedOrder = await PurchaseOrder.findByPk(poId, {
-            include: [{ model: OrderItem, as: 'orderItems' }]
+            include: [{ model: OrderItem, as: 'orderItems' }],
+            transaction: t,
         });
 
+        await t.commit(); // Commit the transaction
         res.status(200).json(updatedOrder);
     } catch (error) {
+        await t.rollback(); // Rollback on error
         console.error('Error updating Purchase Order:', error);
         res.status(500).json({ message: 'Internal server error', error: error.message });
     }

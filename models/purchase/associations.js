@@ -16,38 +16,38 @@ const QuickInvoice = require('../purchase/quickInvoice');
 const QuickInvoiceItem = require('../purchase/quickInvoiceItem');
 
 const defineAssociations = () => {
-    // PurchaseOrder Associations
+    // PurchaseOrder -> OrderItem
     PurchaseOrder.hasMany(OrderItem, { foreignKey: 'poId', as: 'orderItems' });
-    PurchaseOrder.hasMany(StockStorage, { foreignKey: 'poId', as: 'stockStorages' });
-
-    // OrderItem Associations
     OrderItem.belongsTo(PurchaseOrder, { foreignKey: 'poId', as: 'purchaseOrder' });
+
+    // PurchaseOrder -> StockStorage
+    PurchaseOrder.hasMany(StockStorage, { foreignKey: 'poId', as: 'stockStorages' });
+    StockStorage.belongsTo(PurchaseOrder, { foreignKey: 'poId', as: 'purchaseOrder' });
+
+    // OrderItem -> Item
     OrderItem.belongsTo(Item, { foreignKey: 'itemId', as: 'item' });
+    Item.hasMany(OrderItem, { foreignKey: 'itemId', as: 'orderItems' });
+
+    // OrderItem -> GRNItem
     OrderItem.hasMany(GRNItem, { foreignKey: 'orderItemId', as: 'grnItems' });
-
-    // GRN Associations
-    GRN.belongsTo(PurchaseOrder, { foreignKey: 'poId', as: 'purchaseOrder' });
-    GRN.hasMany(GRNItem, { foreignKey: 'grnId', as: 'grnItems' });
-    GRN.hasMany(StockStorage, { foreignKey: 'grnId', as: 'stockStorages' });
-
-    // GRNItem Associations
-    GRNItem.belongsTo(GRN, { foreignKey: 'grnId', as: 'grn' });
     GRNItem.belongsTo(OrderItem, { foreignKey: 'orderItemId', as: 'orderItem' });
 
-    // QuickGRN -> QuickGRNItem
-    // Associations
-    QuickGRN.hasMany(QuickGRNItem, { foreignKey: 'qGRNId', as: 'items' });
-    QuickGRNItem.belongsTo(QuickGRN, { foreignKey: 'qGRNId', as: 'quickGRN' });
+    // GRN -> PurchaseOrder
+    GRN.belongsTo(PurchaseOrder, { foreignKey: 'poId', as: 'purchaseOrder' });
 
+    // GRN -> GRNItem
+    GRN.hasMany(GRNItem, { foreignKey: 'grnId', as: 'grnItems' });
+    GRNItem.belongsTo(GRN, { foreignKey: 'grnId', as: 'grn' });
 
+    // GRN -> StockStorage
+    GRN.hasMany(StockStorage, { foreignKey: 'grnId', as: 'stockStorages' });
+    StockStorage.belongsTo(GRN, { foreignKey: 'grnId', as: 'grn' });
 
-    //Quick GRN Item Associations
-    // QuickGRNItem.belongsTo(QuickGRN, { foreignKey: 'qGRNId', as: 'quickGRN' });
-    // QuickGRNItem.belongsTo(Item, { foreignKey: 'itemId', as: 'item' });
-    // QuickGRNItem.belongsTo(StockStorage, { foreignKey: 'stockStorageId', as: 'stockStorage' });
+    // StockStorage -> Item
+    StockStorage.belongsTo(Item, { foreignKey: 'itemId', as: 'item' });
+    Item.hasMany(StockStorage, { foreignKey: 'itemId', as: 'stockStorages' });
 
-
-    //invoice Associations
+    // Invoice Associations
     PurchaseOrder.hasMany(Invoice, { foreignKey: 'poId', as: 'invoices' });
     Invoice.belongsTo(PurchaseOrder, { foreignKey: 'poId' });
 
@@ -56,26 +56,22 @@ const defineAssociations = () => {
 
     OrderItem.hasOne(InvoiceItem, { foreignKey: 'orderItemId' });
     InvoiceItem.belongsTo(OrderItem, { foreignKey: 'orderItemId' });
-    //end InvoiceItem Associations
 
-    // QuickInvoice Associations
+    // QuickGRN -> QuickGRNItem
+    QuickGRN.hasMany(QuickGRNItem, { foreignKey: 'qGRNId', as: 'items' });
+    QuickGRNItem.belongsTo(QuickGRN, { foreignKey: 'qGRNId', as: 'quickGRN' });
+
+    // QuickInvoice -> QuickInvoiceItem
     QuickInvoice.hasMany(QuickInvoiceItem, { foreignKey: 'quickInvoiceid', as: 'quickInvoiceItems' });
     QuickInvoiceItem.belongsTo(QuickInvoice, { foreignKey: 'quickInvoiceid' });
-    //End QuickInvoice Associations
 
-
-    // StockStorage Associations
-    StockStorage.belongsTo(PurchaseOrder, { foreignKey: 'poId', as: 'purchaseOrder' });
-    StockStorage.belongsTo(GRN, { foreignKey: 'grnId', as: 'grn' });
-    StockStorage.belongsTo(Item, { foreignKey: 'itemId', as: 'item' });
-    Item.hasMany(StockStorage, { foreignKey: 'itemId', as: 'stockStorages' });
-
-    // Distribution Module Associations
+    // Distribution Module
     Distribution.hasMany(DistributionItem, { foreignKey: 'distributionId', as: 'items' });
     DistributionItem.belongsTo(Distribution, { foreignKey: 'distributionId', as: 'distribution' });
     DistributionItem.belongsTo(Item, { foreignKey: 'itemId', as: 'item' });
+
     Distribution.belongsTo(FinancialYear, { foreignKey: 'financialYearId', as: 'financialYear' });
     Distribution.belongsTo(Institute, { foreignKey: 'instituteId', as: 'institute' });
-}
+};
 
 module.exports = defineAssociations;
