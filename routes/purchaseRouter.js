@@ -11,7 +11,7 @@ const QuickInvoiceController = require('../controller/purchase/quickInvoiceContr
 
 
 router.post('/', purchaseOrderController.createPurchaseOrder);
-router.get('/', purchaseOrderController.getAllPurchaseOrders);
+router.get('/allpos', purchaseOrderController.getAllPurchaseOrders);
 router.get('/:poId', purchaseOrderController.getPurchaseOrderById);
 router.put('/:poId', purchaseOrderController.updatePurchaseOrder);
 router.delete('/:poId', purchaseOrderController.deletePurchaseOrder);
@@ -35,6 +35,8 @@ router.delete('/quickgrn/delete/:id', QuickGRNController.deleteQuickGRN); // New
 
 //quick invoice routes
 router.post('/quickinvoice/create', QuickInvoiceController.createQuickInvoice); // New route
+router.get('/quickinvoice/all', QuickInvoiceController.getAllQuickInvoices); // New route
+router.get('/quickinvoice/:id', QuickInvoiceController.getQuickInvoiceById); // New route
 
 router.post('/:poId/grn/:grnId/stock', StockStorageController.updateStockStorage);
 router.get('/stock/item/:itemId', StockStorageController.getStockStorageByItemId);
