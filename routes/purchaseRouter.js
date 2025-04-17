@@ -38,6 +38,7 @@ router.delete('/quickgrn/delete/:id', QuickGRNController.deleteQuickGRN); // New
 router.post('/quickinvoice/create', QuickInvoiceController.createQuickInvoice); // New route
 router.get('/quickinvoice/all', QuickInvoiceController.getAllQuickInvoices); // New route
 router.get('/quickinvoice/:id', QuickInvoiceController.getQuickInvoiceById); // New route
+router.put('/quickinvoice/:id', QuickInvoiceController.updateQuickInvoice); // New route
 
 router.post('/:poId/grn/:grnId/stock', StockStorageController.updateStockStorage);
 router.get('/stock/item/:itemId', StockStorageController.getStockStorageByItemId);
