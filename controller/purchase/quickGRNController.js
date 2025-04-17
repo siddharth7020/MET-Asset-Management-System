@@ -114,7 +114,7 @@ const getAllQuickGRNs = async (req, res) => {
 };
 
 
-
+// Fetch QuickGRN by ID with associated items
 const getQuickGRNById = async (req, res) => {
     try {
         const { id } = req.params;
@@ -133,9 +133,7 @@ const getQuickGRNById = async (req, res) => {
     }
 };
 
-
-
-
+// Update QuickGRN with Items and Stock Storage
 const updateQuickGRN = async (req, res) => {
     try {
         const { id } = req.params;
@@ -155,13 +153,14 @@ const updateQuickGRN = async (req, res) => {
 
         const transaction = await sequelize.transaction();
         try {
-            // Find and update QuickGRN
+            // Find QuickGRN
             const quickGRN = await QuickGRN.findByPk(id, { transaction });
             if (!quickGRN) {
                 await transaction.rollback();
                 return res.status(404).json({ message: 'QuickGRN not found' });
             }
 
+            // Update QuickGRN fields
             await quickGRN.update({
                 qGRNDate,
                 qGRNNo,
@@ -175,7 +174,32 @@ const updateQuickGRN = async (req, res) => {
                 remark
             }, { transaction });
 
-            // Handle each item update
+            // Get existing QuickGRNItems
+            const existingItems = await QuickGRNItem.findAll({
+                where: { qGRNId: id },
+                transaction
+            });
+
+            // Prepare new QuickGRNItems data
+            const newItemIds = quickGRNItems.map(item => item.qGRNItemid).filter(id => id);
+            const itemsToDelete = existingItems.filter(item => !newItemIds.includes(item.qGRNItemid));
+
+            // Delete items that are no longer in the input
+            if (itemsToDelete.length > 0) {
+                const deleteItemIds = itemsToDelete.map(item => item.qGRNItemid);
+                await QuickGRNItem.destroy({
+                    where: { qGRNItemid: deleteItemIds },
+                    transaction
+                });
+
+                // Delete corresponding StockStorage records for removed items
+                await StockStorage.destroy({
+                    where: { qGRNId: id, itemId: itemsToDelete.map(item => item.itemId) },
+                    transaction
+                });
+            }
+
+            // Update or create QuickGRNItems
             for (const item of quickGRNItems) {
                 const {
                     qGRNItemid,
@@ -190,10 +214,10 @@ const updateQuickGRN = async (req, res) => {
                 const amount = quantity * rate;
                 const totalAmount = amount - discount;
 
-                let existingItem = await QuickGRNItem.findByPk(qGRNItemid, { transaction });
+                let existingItem = qGRNItemid ? await QuickGRNItem.findByPk(qGRNItemid, { transaction }) : null;
 
                 if (existingItem) {
-                    // Update the item
+                    // Update existing item
                     await existingItem.update({
                         itemId,
                         quantity,
@@ -205,7 +229,7 @@ const updateQuickGRN = async (req, res) => {
                         rejectedQuantity
                     }, { transaction });
                 } else {
-                    // If item doesn't exist, create new
+                    // Create new item
                     existingItem = await QuickGRNItem.create({
                         qGRNId: id,
                         itemId,
@@ -220,18 +244,15 @@ const updateQuickGRN = async (req, res) => {
                 }
 
                 // Update or create StockStorage
-                const stockRecord = await StockStorage.findOne({
+                let stockRecord = await StockStorage.findOne({
                     where: { qGRNId: id, itemId },
                     transaction
                 });
 
                 if (stockRecord) {
-                    // Adjust quantity difference
-                    const prevReceived = stockRecord.quantity;
-                    const newReceived = receivedQuantity;
-
+                    // Update existing stock record
                     await stockRecord.update({
-                        quantity: newReceived,
+                        quantity: receivedQuantity,
                         remark: remark || stockRecord.remark
                     }, { transaction });
                 } else {
@@ -266,7 +287,7 @@ const updateQuickGRN = async (req, res) => {
     }
 };
 
-
+// Delete QuickGRN and associated items and stock records
 const deleteQuickGRN = async (req, res) => {
     const { id } = req.params;
 
