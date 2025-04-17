@@ -24,6 +24,7 @@ router.get('/:poId/grn', GRNController.getAllGRNs);
 
 router.post('/invoice/create', invoiceController.createInvoice);
 router.get('/invoices/:id', invoiceController.getInvoice);
+router.put('/invoiceupdate/:id', invoiceController.updateInvoice);
 router.get('/po-details/:poId', invoiceController.getPODetailsForInvoice);
 
 // New route for QuickGRN
