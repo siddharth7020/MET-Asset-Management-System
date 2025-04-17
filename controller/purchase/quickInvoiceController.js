@@ -11,21 +11,37 @@ const createQuickInvoice = async (req, res) => {
     try {
         const { qGRNIds, qInvoiceDate, remark, taxDetails } = req.body;
 
+        // Validate inputs
         if (!qGRNIds || !Array.isArray(qGRNIds) || qGRNIds.length === 0) {
-            return res.status(400).json({ message: 'GRN IDs are required.' });
+            return res.status(400).json({ message: 'qGRNIds are required and must be a non-empty array.' });
+        }
+        if (!qInvoiceDate) {
+            return res.status(400).json({ message: 'qInvoiceDate is required.' });
+        }
+        if (!taxDetails || typeof taxDetails !== 'object') {
+            return res.status(400).json({ message: 'taxDetails must be provided as an object.' });
         }
 
-        // 1. Fetch all items related to the selected GRNs
+        // Fetch all items related to the selected GRNs
         const items = await QuickGRNItem.findAll({
             where: { qGRNId: qGRNIds },
             raw: true
         });
 
         if (!items.length) {
+            await t.rollback();
             return res.status(404).json({ message: 'No items found for the selected GRNs.' });
         }
 
-        // 2. Generate Invoice Number: QINV-YYYYMMDD-001
+        // Validate taxDetails for each item
+        for (const item of items) {
+            if (!taxDetails[item.qGRNItemid] || !Number.isFinite(taxDetails[item.qGRNItemid].taxPercentage) || taxDetails[item.qGRNItemid].taxPercentage < 0) {
+                await t.rollback();
+                return res.status(400).json({ message: `Invalid or missing taxPercentage for qGRNItemid: ${item.qGRNItemid}.` });
+            }
+        }
+
+        // Generate Invoice Number: QINV-YYYYMMDD-001
         const today = moment(qInvoiceDate).format('YYYYMMDD');
         const existingInvoicesToday = await QuickInvoice.count({
             where: {
@@ -37,12 +53,12 @@ const createQuickInvoice = async (req, res) => {
         const counter = String(existingInvoicesToday + 1).padStart(3, '0');
         const qInvoiceNo = `QINV-${today}-${counter}`;
 
-        // 3. Prepare and calculate invoice items
+        // Prepare and calculate invoice items
         let invoiceTotal = 0.0;
         const invoiceItemsData = items.map(item => {
-            const taxPercentage = taxDetails[item.qGRNItemid]?.taxPercentage || 0;
-            const baseAmount = parseFloat(item.totalAmount);
-            const taxAmount = parseFloat((baseAmount * taxPercentage) / 100);
+            const taxPercentage = Number(taxDetails[item.qGRNItemid].taxPercentage);
+            const baseAmount = Number(item.quantity) * Number(item.rate) - Number(item.discount || 0);
+            const taxAmount = (baseAmount * taxPercentage) / 100;
             const totalAmount = baseAmount + taxAmount;
 
             invoiceTotal += totalAmount;
@@ -52,15 +68,15 @@ const createQuickInvoice = async (req, res) => {
                 qGRNItemid: item.qGRNItemid,
                 itemId: item.itemId,
                 quantity: item.quantity,
-                rate: item.rate,
-                discount: item.discount,
-                taxPercentage,
-                taxAmount,
-                totalAmount
+                rate: Number(item.rate).toFixed(2),
+                discount: Number(item.discount || 0).toFixed(2),
+                taxPercentage: taxPercentage.toFixed(2),
+                taxAmount: taxAmount.toFixed(2),
+                totalAmount: totalAmount.toFixed(2)
             };
         });
 
-        // 4. Create the Invoice
+        // Create the Invoice
         const invoice = await QuickInvoice.create({
             qInvoiceNo,
             qInvoiceDate,
@@ -69,7 +85,7 @@ const createQuickInvoice = async (req, res) => {
             remark
         }, { transaction: t });
 
-        // 5. Add invoiceId to invoice items and create them
+        // Add qInvoiceId to invoice items and create them
         const enrichedItems = invoiceItemsData.map(item => ({
             ...item,
             qInvoiceId: invoice.qInvoiceId
@@ -78,7 +94,13 @@ const createQuickInvoice = async (req, res) => {
         await QuickInvoiceItem.bulkCreate(enrichedItems, { transaction: t });
 
         await t.commit();
-        return res.status(201).json({ message: 'Quick Invoice created successfully.', invoice });
+
+        // Fetch the created invoice with items for response
+        const createdInvoice = await QuickInvoice.findByPk(invoice.qInvoiceId, {
+            include: [{ model: QuickInvoiceItem, as: 'quickInvoiceItems' }]
+        });
+
+        return res.status(201).json({ message: 'Quick Invoice created successfully.', invoice: createdInvoice });
 
     } catch (error) {
         await t.rollback();
