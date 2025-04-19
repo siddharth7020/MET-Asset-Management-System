@@ -1,3 +1,4 @@
+const { Op } = require('sequelize'); // Add this import
 const Distribution = require('../../models/distribution/Distribution');
 const DistributionItem = require('../../models/distribution/DistributionItem');
 const Item = require('../../models/master/item');
@@ -7,6 +8,18 @@ const Institute = require('../../models/master/institute');
 const sequelize = require('../../config/database');
 
 
+// GET all Distributions
+const getAllDistributions = async (req, res) => {
+    try {
+        const distributions = await Distribution.findAll({
+            include: [{ model: DistributionItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] }]
+        });
+        res.json(distributions);
+    } catch (error) {
+        console.error('Error fetching Distributions:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
 
 // CREATE a Stock Distribution
 const createDistribution = async (req, res) => {
@@ -14,7 +27,7 @@ const createDistribution = async (req, res) => {
         const { financialYearId, instituteId, employeeName, location, documents, remark, items } = req.body;
 
         // Validate required fields
-        if (!financialYearId || !instituteId || !employeeName || !location || !items || items.length === 0) {
+        if (!financialYearId || !instituteId || !employeeName || !location || !items || !Array.isArray(items) || items.length === 0) {
             return res.status(400).json({ message: 'financialYearId, instituteId, employeeName, location, and items are required' });
         }
 
@@ -37,12 +50,20 @@ const createDistribution = async (req, res) => {
         });
 
         for (const item of items) {
+            if (!item.itemId || !item.issueQuantity || item.issueQuantity <= 0) {
+                return res.status(400).json({ message: `Invalid item data for itemId ${item.itemId}` });
+            }
+
+            const dbItem = await Item.findByPk(item.itemId);
+            if (!dbItem) {
+                return res.status(404).json({ message: `Item with ID ${item.itemId} not found` });
+            }
+
             const stock = stockEntries.find(se => se.itemId === item.itemId);
             const totalStock = stock ? parseInt(stock.getDataValue('totalStock')) : 0;
             if (!stock || item.issueQuantity > totalStock) {
-                const itemName = (await Item.findByPk(item.itemId))?.itemName || 'Unknown';
                 return res.status(400).json({
-                    message: `Insufficient stock for item ${itemName} (ID: ${item.itemId}). Requested: ${item.issueQuantity}, Available: ${totalStock}`
+                    message: `Insufficient stock for item ${dbItem.itemName} (ID: ${item.itemId}). Requested: ${item.issueQuantity}, Available: ${totalStock}`
                 });
             }
         }
@@ -64,7 +85,6 @@ const createDistribution = async (req, res) => {
             const distributionItems = items.map(item => ({
                 distributionId: distribution.id,
                 itemId: item.itemId,
-                itemName: item.itemName,
                 issueQuantity: item.issueQuantity
             }));
             await DistributionItem.bulkCreate(distributionItems, { transaction });
@@ -73,16 +93,16 @@ const createDistribution = async (req, res) => {
             for (const item of items) {
                 let remainingQuantity = item.issueQuantity;
                 const stockRecords = await StockStorage.findAll({
-                    where: { itemId: item.itemId },
-                    order: [['createdAt', 'ASC']] // Oldest first
+                    where: { itemId: item.itemId, quantity: { [Op.gt]: 0 } }, // Fixed: Use Op.gt
+                    order: [['createdAt', 'ASC']], // Oldest first (FIFO)
+                    transaction
                 });
 
-                const availableStock = stockRecords.filter(stock => stock.quantity > 0);
-                if (availableStock.length === 0) {
+                if (!stockRecords || stockRecords.length === 0) {
                     throw new Error(`No available stock for itemId ${item.itemId}`);
                 }
 
-                for (const stock of availableStock) {
+                for (const stock of stockRecords) {
                     if (remainingQuantity <= 0) break;
                     const deduct = Math.min(remainingQuantity, stock.quantity);
                     await stock.update({ quantity: stock.quantity - deduct }, { transaction });
@@ -97,13 +117,13 @@ const createDistribution = async (req, res) => {
             await transaction.commit();
         } catch (error) {
             await transaction.rollback();
-            throw error; // Re-throw to outer catch
+            throw error;
         }
 
-        // Fetch created distribution after commit (outside transaction)
+        // Fetch created distribution after commit
         try {
             const createdDistribution = await Distribution.findByPk(distribution.id, {
-                include: [{ model: DistributionItem, as: 'item', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] }]
+                include: [{ model: DistributionItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] }]
             });
 
             if (!createdDistribution) {
@@ -116,7 +136,6 @@ const createDistribution = async (req, res) => {
             });
         } catch (fetchError) {
             console.error('Error fetching created Distribution:', fetchError);
-            // Transaction is already committed, so no rollback; just return success with a note
             return res.status(201).json({
                 message: 'Distribution created successfully, but retrieval failed',
                 data: { id: distribution.id },
@@ -129,12 +148,200 @@ const createDistribution = async (req, res) => {
     }
 };
 
-// get a Distribution by ID
+// UPDATE a Stock Distribution
+const updateDistribution = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { financialYearId, instituteId, employeeName, location, documents, remark, items } = req.body;
+
+        // Check if distribution exists
+        const distribution = await Distribution.findByPk(id, {
+            include: [{ model: DistributionItem, as: 'items' }]
+        });
+        if (!distribution) {
+            return res.status(404).json({ message: 'Distribution not found' });
+        }
+
+        // Validate financialYearId and instituteId if provided
+        if (financialYearId) {
+            const financialYear = await FinancialYear.findByPk(financialYearId);
+            if (!financialYear) {
+                return res.status(404).json({ message: `Financial Year with ID ${financialYearId} not found` });
+            }
+        }
+        if (instituteId) {
+            const institute = await Institute.findByPk(instituteId);
+            if (!institute) {
+                return res.status(404).json({ message: `Institute with ID ${instituteId} not found` });
+            }
+        }
+
+        // Validate items if provided
+        let newItemIds = [];
+        if (items && Array.isArray(items)) {
+            if (items.length === 0) {
+                return res.status(400).json({ message: 'Items array cannot be empty' });
+            }
+            newItemIds = items.map(item => item.itemId);
+            for (const item of items) {
+                if (!item.itemId || !item.issueQuantity || item.issueQuantity <= 0) {
+                    return res.status(400).json({ message: `Invalid item data for itemId ${item.itemId}` });
+                }
+                const dbItem = await Item.findByPk(item.itemId);
+                if (!dbItem) {
+                    return res.status(404).json({ message: `Item with ID ${item.itemId} not found` });
+                }
+            }
+        }
+
+        const transaction = await sequelize.transaction();
+        try {
+            // Update Distribution fields (only if provided)
+            await distribution.update({
+                financialYearId: financialYearId || distribution.financialYearId,
+                instituteId: instituteId || distribution.instituteId,
+                employeeName: employeeName || distribution.employeeName,
+                location: location || distribution.location,
+                documents: documents !== undefined ? documents : distribution.documents,
+                remark: remark !== undefined ? remark : distribution.remark
+            }, { transaction });
+
+            // Handle items update if provided
+            if (items && Array.isArray(items)) {
+                // Calculate stock adjustments
+                const existingItems = distribution.items.reduce((acc, item) => {
+                    acc[item.itemId] = item.issueQuantity;
+                    return acc;
+                }, {});
+                const newItems = items.reduce((acc, item) => {
+                    acc[item.itemId] = item.issueQuantity;
+                    return acc;
+                }, {});
+
+                // Validate stock availability for increased quantities
+                const stockEntries = await StockStorage.findAll({
+                    where: { itemId: newItemIds },
+                    attributes: ['itemId', [sequelize.fn('SUM', sequelize.col('quantity')), 'totalStock']],
+                    group: ['itemId'],
+                    transaction
+                });
+
+                for (const item of items) {
+                    const oldQuantity = existingItems[item.itemId] || 0;
+                    const quantityDiff = item.issueQuantity - oldQuantity; // Positive: need more stock, Negative: restore stock
+                    if (quantityDiff > 0) {
+                        const stock = stockEntries.find(se => se.itemId === item.itemId);
+                        const totalStock = stock ? parseInt(stock.getDataValue('totalStock')) : 0;
+                        if (!stock || quantityDiff > totalStock) {
+                            const dbItem = await Item.findByPk(item.itemId);
+                            throw new Error(`Insufficient stock for item ${dbItem.itemName} (ID: ${item.itemId}). Requested: ${quantityDiff}, Available: ${totalStock}`);
+                        }
+                    }
+                }
+
+                // Restore stock for removed or reduced items
+                for (const existingItem of distribution.items) {
+                    const newQuantity = newItems[existingItem.itemId] || 0;
+                    const quantityDiff = existingItem.issueQuantity - newQuantity; // Positive: restore stock
+                    if (quantityDiff > 0) {
+                        const stockRecords = await StockStorage.findAll({
+                            where: { itemId: existingItem.itemId },
+                            order: [['createdAt', 'DESC']],
+                            transaction
+                        });
+                        if (stockRecords.length > 0) {
+                            const latestStock = stockRecords[0];
+                            await latestStock.update(
+                                { quantity: latestStock.quantity + quantityDiff },
+                                { transaction }
+                            );
+                        } else {
+                            await StockStorage.create(
+                                { itemId: existingItem.itemId, quantity: quantityDiff },
+                                { transaction }
+                            );
+                        }
+                    }
+                }
+
+                // Delete existing DistributionItems
+                await DistributionItem.destroy({ where: { distributionId: id }, transaction });
+
+                // Create new DistributionItems
+                const distributionItems = items.map(item => ({
+                    distributionId: id,
+                    itemId: item.itemId,
+                    issueQuantity: item.issueQuantity
+                }));
+                await DistributionItem.bulkCreate(distributionItems, { transaction });
+
+                // Deduct stock for new or increased items
+                for (const item of items) {
+                    const oldQuantity = existingItems[item.itemId] || 0;
+                    const quantityDiff = item.issueQuantity - oldQuantity; // Positive: deduct stock
+                    if (quantityDiff > 0) {
+                        let remainingQuantity = quantityDiff;
+                        const stockRecords = await StockStorage.findAll({
+                            where: { itemId: item.itemId, quantity: { [Op.gt]: 0 } },
+                            order: [['createdAt', 'ASC']],
+                            transaction
+                        });
+                        if (!stockRecords || stockRecords.length === 0) {
+                            throw new Error(`No available stock for itemId ${item.itemId}`);
+                        }
+                        for (const stock of stockRecords) {
+                            if (remainingQuantity <= 0) break;
+                            const deduct = Math.min(remainingQuantity, stock.quantity);
+                            await stock.update({ quantity: stock.quantity - deduct }, { transaction });
+                            remainingQuantity -= deduct;
+                        }
+                        if (remainingQuantity > 0) {
+                            throw new Error(`Could not deduct full quantity for itemId ${item.itemId}`);
+                        }
+                    }
+                }
+            }
+
+            await transaction.commit();
+        } catch (error) {
+            await transaction.rollback();
+            throw error;
+        }
+
+        // Fetch updated distribution
+        try {
+            const updatedDistribution = await Distribution.findByPk(id, {
+                include: [{ model: DistributionItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] }]
+            });
+
+            if (!updatedDistribution) {
+                return res.status(500).json({ message: 'Distribution updated but could not be retrieved' });
+            }
+
+            res.status(200).json({
+                message: 'Distribution updated successfully',
+                data: updatedDistribution
+            });
+        } catch (fetchError) {
+            console.error('Error fetching updated Distribution:', fetchError);
+            return res.status(200).json({
+                message: 'Distribution updated successfully, but retrieval failed',
+                data: { id },
+                error: fetchError.message
+            });
+        }
+    } catch (error) {
+        console.error('Error updating Distribution:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+// GET a Distribution by ID
 const getDistributionById = async (req, res) => {
     try {
         const { id } = req.params;
         const distribution = await Distribution.findByPk(id, {
-            include: [{ model: DistributionItem, as: 'item', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] }] // Include Item details
+            include: [{ model: DistributionItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] }]
         });
 
         if (!distribution) {
@@ -148,67 +355,6 @@ const getDistributionById = async (req, res) => {
     }
 };
 
-// if i delete a distribution, the stock should be added back to the stock storage
-const deleteDistribution = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const distribution = await Distribution.findByPk(id, { include: [{ model: DistributionItem, as: 'item' }] });
-
-        if (!distribution) {
-            return res.status(404).json({ message: 'Distribution not found' });
-        }
-
-        // Start a transaction
-        const transaction = await sequelize.transaction();
-        try {
-            // Add stock back to StockStorage
-            for (const item of distribution.item) {
-                const stockRecord = await StockStorage.findOne({
-                    where: { itemId: item.itemId },
-                    order: [['createdAt', 'DESC']] // Newest first
-                });
-
-                if (stockRecord) {
-                    await stockRecord.update({ quantity: stockRecord.quantity + item.issueQuantity }, { transaction });
-                } else {
-                    await StockStorage.create({
-                        itemId: item.itemId,
-                        quantity: item.issueQuantity
-                    }, { transaction });
-                }
-            }
-
-            // Delete the distribution and its items
-            await DistributionItem.destroy({ where: { distributionId: id }, transaction });
-            await Distribution.destroy({ where: { id }, transaction });
-
-            // Commit the transaction
-            await transaction.commit();
-
-            res.status(200).json({ message: 'Distribution deleted successfully' });
-        } catch (error) {
-            await transaction.rollback();
-            console.error('Error deleting Distribution:', error);
-            res.status(500).json({ message: 'Internal server error', error: error.message });
-        }
-    } catch (error) {
-        console.error('Error fetching Distribution for deletion:', error);
-        res.status(500).json({ message: 'Internal server error', error: error.message });
-    }
-};
-// get all Distribution
-const getAllDistributions = async (req, res) => {
-    try {
-        const distributions = await Distribution.findAll({
-            include: [{ model: DistributionItem, as: 'item', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] }] // Include Item details
-        });
-        res.json(distributions);
-    } catch (error) {
-        console.error('Error fetching Distributions:', error);
-        res.status(500).json({ message: 'Internal server error', error: error.message });
-    }
-};
-
 
 
 
@@ -217,7 +363,8 @@ const getAllDistributions = async (req, res) => {
 // Export the functions
 module.exports = {
     createDistribution,
+    updateDistribution,
     getDistributionById,
-    deleteDistribution,
-    getAllDistributions
+    getAllDistributions,
+  
 };
