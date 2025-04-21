@@ -8,6 +8,7 @@ const StockStorageController = require('../controller/distribution/StockStograge
 const invoiceController = require('../controller/purchase/invoiceController'); // New import
 const QuickGRNController = require('../controller/purchase/quickGRNController'); // New import
 const QuickInvoiceController = require('../controller/purchase/quickInvoiceController'); // New import
+const ReturnController = require('../controller/distribution/ReturnController'); // New import
 
 
 router.post('/', purchaseOrderController.createPurchaseOrder);
@@ -49,5 +50,7 @@ router.post('/distribution', DistributionController.createDistribution); // New 
 router.get('/distribution/:id', DistributionController.getDistributionById); // New endpoint
 router.get('/distributions', DistributionController.getAllDistributions); // New endpoint
 router.put('/updatedistribution/:id', DistributionController.updateDistribution); // New endpoint
+
+router.post('/distribution/:distributionId/return', ReturnController.createReturn); // New endpoint
 
 module.exports = router;

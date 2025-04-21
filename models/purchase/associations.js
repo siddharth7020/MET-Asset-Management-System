@@ -14,6 +14,8 @@ const QuickGRN = require('../purchase/quickGRN');
 const QuickGRNItem = require('../purchase/quickGRNItem');
 const QuickInvoice = require('../purchase/quickInvoice');
 const QuickInvoiceItem = require('../purchase/quickInvoiceItem');
+const Return = require('../../models/distribution/Return');
+const ReturnItem = require('../../models/distribution/ReturnItem');
 
 const defineAssociations = () => {
     // PurchaseOrder -> OrderItem
@@ -69,12 +71,19 @@ const defineAssociations = () => {
     Distribution.hasMany(DistributionItem, { foreignKey: 'distributionId', as: 'items' });
     DistributionItem.belongsTo(Distribution, { foreignKey: 'distributionId', as: 'distribution' });
     DistributionItem.belongsTo(Item, { foreignKey: 'itemId', as: 'item' });
-
     Distribution.belongsTo(FinancialYear, { foreignKey: 'financialYearId', as: 'financialYear' });
     Distribution.belongsTo(Institute, { foreignKey: 'instituteId', as: 'institute' });
 
     // Optional: Inverse relationships for Item
     Item.hasMany(DistributionItem, { foreignKey: 'itemId', as: 'distributionItems' });
+
+    // Return Associations
+    Return.hasMany(ReturnItem, { foreignKey: 'returnId', as: 'items' });
+    ReturnItem.belongsTo(Return, { foreignKey: 'returnId', as: 'return' });
+    ReturnItem.belongsTo(Item, { foreignKey: 'itemId', as: 'item' });
+    Return.belongsTo(Distribution, { foreignKey: 'distributionId', as: 'distribution' });
+    Return.belongsTo(FinancialYear, { foreignKey: 'financialYearId', as: 'financialYear' });
+    Return.belongsTo(Institute, { foreignKey: 'instituteId', as: 'institute' });
 };
 
 module.exports = defineAssociations;
