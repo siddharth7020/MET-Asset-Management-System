@@ -52,5 +52,7 @@ router.get('/distributions', DistributionController.getAllDistributions); // New
 router.put('/updatedistribution/:id', DistributionController.updateDistribution); // New endpoint
 
 router.post('/distribution/:distributionId/return', ReturnController.createReturn); // New endpoint
+router.get('/distribution/:distributionId/allreturns', ReturnController.getAllReturns); // New endpoint
+router.get('/distribution/return/:id', ReturnController.getReturnById); // New endpoint
 
 module.exports = router;

@@ -143,7 +143,43 @@ const createReturn = async (req, res) => {
     }
 };
 
+// get all returns
+const getAllReturns = async (req, res) => {
+    try {
+        const returns = await Return.findAll({
+            include: [{ model: ReturnItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] }]
+        });
+        res.json(returns);
+    } catch (error) {
+        console.error('Error fetching Returns:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+// GET a Return by ID
+const getReturnById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const returnRecord = await Return.findByPk(id, {
+            include: [{ model: ReturnItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] }]
+        });
+
+        if (!returnRecord) {
+            return res.status(404).json({ message: 'Return not found' });
+        }
+
+        res.json(returnRecord);
+    } catch (error) {
+        console.error('Error fetching Return:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+
+
 // Export the function
 module.exports = {
-    createReturn
+    createReturn,
+    getAllReturns,
+    getReturnById
 };
