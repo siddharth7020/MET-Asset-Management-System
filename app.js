@@ -3,6 +3,8 @@ const express = require("express");
 // Database configuration
 const db = require("./config/database");
 
+const cors = require("cors");
+
 // Routers
 const mainRouter = require("./routes/routers"); // Assuming this is the intended main router file
 const purchaseRouter = require("./routes/purchaseRouter"); // Renamed to avoid conflict
@@ -11,6 +13,8 @@ const defineAssociations = require("./models/purchase/associations");
 
 const app = express();
 app.use(express.json());
+
+app.use(cors()); // Enable CORS for all routes
 
 // Routes
 app.use("/api", mainRouter); // Main router for general routes

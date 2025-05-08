@@ -7,6 +7,42 @@ const sequelize = require('../../config/database');
 const { Op } = require('sequelize');
 
 
+// GET all GRNs for a Purchase Order
+const getAllGRNs = async (req, res) => {
+    try {
+        // Fetch all GRNs with their GRNItems
+        const grns = await GRN.findAll({
+            include: [{ model: GRNItem, as: 'grnItems' }]
+        });
+
+        res.status(200).json(grns);
+    } catch (error) {
+        console.error('Error fetching GRNs:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+// GET a GRN by ID
+const getGRNById = async (req, res) => {
+    try {
+        const {  id } = req.params;
+        // Fetch GRN with its GRNItems
+        const grn = await GRN.findOne({
+            where: { id: id },
+            include: [{ model: GRNItem, as: 'grnItems' }]
+        });
+
+        if (!grn) {
+            return res.status(404).json({ message: 'GRN not found for this Purchase Order' });
+        }
+
+        res.status(200).json(grn);
+    } catch (error) {
+        console.error('Error fetching GRN:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
 // Create GRN with Items and Stock Storage
 const createGRN = async (req, res) => {
     try {
@@ -402,57 +438,8 @@ const deleteGRN = async (req, res) => {
     }
 };
 
-// GET a GRN by ID
-const getGRNById = async (req, res) => {
-    try {
-        const { poId, grnId } = req.params;
 
-        // Check if PurchaseOrder exists
-        const purchaseOrder = await PurchaseOrder.findByPk(poId);
-        if (!purchaseOrder) {
-            return res.status(404).json({ message: 'Purchase Order not found' });
-        }
 
-        // Fetch GRN with its GRNItems
-        const grn = await GRN.findOne({
-            where: { id: grnId, poId },
-            include: [{ model: GRNItem, as: 'grnItems' }]
-        });
-
-        if (!grn) {
-            return res.status(404).json({ message: 'GRN not found for this Purchase Order' });
-        }
-
-        res.status(200).json(grn);
-    } catch (error) {
-        console.error('Error fetching GRN:', error);
-        res.status(500).json({ message: 'Internal server error', error: error.message });
-    }
-};
-
-// GET all GRNs for a Purchase Order
-const getAllGRNs = async (req, res) => {
-    try {
-        const { poId } = req.params;
-
-        // Check if PurchaseOrder exists
-        const purchaseOrder = await PurchaseOrder.findByPk(poId);
-        if (!purchaseOrder) {
-            return res.status(404).json({ message: 'Purchase Order not found' });
-        }
-
-        // Fetch all GRNs for this poId with their GRNItems
-        const grns = await GRN.findAll({
-            where: { poId },
-            include: [{ model: GRNItem, as: 'grnItems' }]
-        });
-
-        res.status(200).json(grns);
-    } catch (error) {
-        console.error('Error fetching GRNs:', error);
-        res.status(500).json({ message: 'Internal server error', error: error.message });
-    }
-};
 
 module.exports = {
     createGRN,

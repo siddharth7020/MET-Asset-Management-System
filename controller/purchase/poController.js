@@ -25,7 +25,7 @@ const createPurchaseOrder = async (req, res) => {
             instituteId,
             financialYearId,
             vendorId,
-            document,
+            document: JSON.stringify(req.body.document), // <--- Convert to string
             requestedBy,
             remark
         });

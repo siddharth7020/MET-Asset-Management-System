@@ -4,6 +4,26 @@ const PurchaseOrder = require('../../models/purchase/PurchaseOrder'); // Adjust 
 const OrderItem = require('../../models/purchase/OrderItem'); // Adjust the path as necessary
 const { Sequelize } = require('sequelize');
 
+
+//get all invoices
+const getAllInvoices = async (req, res) => {
+    try {
+        const invoices = await Invoice.findAll({
+            include: [
+                { model: PurchaseOrder, as: 'PurchaseOrder' },
+                { model: InvoiceItem, as: 'items', include: [{ model: OrderItem, as: 'OrderItem' }] }
+            ]
+        });
+
+        const allItemsTotalAmount = invoices.reduce((sum, invoice) => {
+            return sum + invoice.items.reduce((itemSum, item) => itemSum + Number(item.totalAmount), 0);
+        }, 0);
+
+        res.json({ invoices, allItemsTotalAmount });
+    } catch (error) {
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+}
 // Create Invoice
 const createInvoice = async (req, res) => {
     try {
@@ -259,4 +279,4 @@ const getPODetailsForInvoice = async (req, res) => {
     }
 };
 
-module.exports = { createInvoice, getInvoice, updateInvoice, getPODetailsForInvoice };
+module.exports = {getAllInvoices, createInvoice, getInvoice, updateInvoice, getPODetailsForInvoice };

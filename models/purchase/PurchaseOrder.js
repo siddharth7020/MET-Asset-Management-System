@@ -29,9 +29,9 @@ const PurchaseOrder = sequelize.define('PurchaseOrder', {
         allowNull: false
     },
     document: {
-        type: DataTypes.STRING, // Consider JSON if multiple documents are needed
+        type: DataTypes.JSON,
         allowNull: true
-    },
+      },
     requestedBy: {
         type: DataTypes.STRING,
         allowNull: false
