@@ -45,111 +45,135 @@ const getGRNById = async (req, res) => {
 
 // Create GRN with Items and Stock Storage
 const createGRN = async (req, res) => {
-    try {
-        const { poId } = req.params;
-        const { grnNo, grnDate, challanNo, challanDate, document, remark, grnItems } = req.body;
-
-        // Validate required fields
-        if (!grnNo || !grnDate || !challanNo || !challanDate) {
-            return res.status(400).json({ message: 'grnNo, grnDate, challanNo, and challanDate are required' });
-        }
-
-        // Check if Purchase Order exists
-        const purchaseOrder = await PurchaseOrder.findByPk(poId);
-        if (!purchaseOrder) {
-            return res.status(404).json({ message: 'Purchase Order not found' });
-        }
-
-        // Validate OrderItem IDs
-        const orderItemIds = grnItems.map(item => item.orderItemId);
-        const orderItems = await OrderItem.findAll({ where: { id: orderItemIds, poId } });
-
-        if (orderItems.length !== orderItemIds.length) {
-            const invalidIds = orderItemIds.filter(id => !orderItems.some(item => item.id === id));
-            return res.status(400).json({ message: `OrderItem IDs not found for PO ${poId}: ${invalidIds.join(', ')}` });
-        }
-
-        const transaction = await sequelize.transaction();
-        try {
-            // Create GRN
-            const grn = await GRN.create({
-                poId,
-                grnNo,
-                grnDate,
-                challanNo,
-                challanDate,
-                document,
-                remark
-            }, { transaction });
-
-            // Create GRN Items
-            const grnItemData = await Promise.all(grnItems.map(async (item) => {
-                const orderItem = orderItems.find(oi => oi.id === item.orderItemId);
-                const previousReceived = await GRNItem.sum('receivedQuantity', {
-                    where: { orderItemId: item.orderItemId },
-                    transaction
-                });
-                const remainingQuantity = orderItem.quantity - (previousReceived || 0);
-                const rejectedQuantity = Math.max(remainingQuantity - item.receivedQuantity, 0);
-
-                return {
-                    grnId: grn.id,
-                    orderItemId: item.orderItemId,
-                    receivedQuantity: item.receivedQuantity,
-                    rejectedQuantity
-                };
-            }));
-
-            await GRNItem.bulkCreate(grnItemData, { transaction });
-
-            // Stock Update in StockStorage
-            for (const item of grnItemData) {
-                const orderItem = orderItems.find(oi => oi.id === item.orderItemId);
-                const stockRecord = await StockStorage.findOne({
-                    where: {
-                        poId,
-                        grnId: grn.id,
-                        itemId: orderItem.itemId
-                    },
-                    transaction
-                });
-
-                if (stockRecord) {
-                    // Update existing stock record
-                    await stockRecord.update({
-                        quantity: stockRecord.quantity + item.receivedQuantity,
-                        remark: remark || stockRecord.remark
-                    }, { transaction });
-                } else {
-                    // Create new stock record
-                    await StockStorage.create({
-                        poId,              // Relevant for GRN
-                        grnId: grn.id,     // Relevant for GRN
-                        qGRNId: null,      // Not relevant for GRN
-                        itemId: orderItem.itemId,
-                        quantity: item.receivedQuantity,
-                        remark: remark || null
-                    }, { transaction });
-                }
-            }
-
-            await transaction.commit();
-
-            // Fetch the created GRN with its items
-            const createdGRN = await GRN.findByPk(grn.id, {
-                include: [{ model: GRNItem, as: 'grnItems' }]
-            });
-
-            res.status(201).json(createdGRN);
-        } catch (error) {
-            await transaction.rollback();
-            throw error;
-        }
-    } catch (error) {
-        console.error('Error creating GRN:', error);
-        res.status(500).json({ message: 'Internal server error', error: error.message });
-    }
-};
+    uego: true
+     try {
+         const { poId } = req.params;
+         const { grnNo, grnDate, challanNo, challanDate, document, remark, grnItems } = req.body;
+ 
+         // Validate required fields
+         if (!grnNo || !grnDate || !challanNo || !challanDate) {
+             return res.status(400).json({ message: 'grnNo, grnDate, challanNo, and challanDate are required' });
+         }
+ 
+         // Check if Purchase Order exists
+         const purchaseOrder = await PurchaseOrder.findByPk(poId);
+         if (!purchaseOrder) {
+             return res.status(404).json({ message: 'Purchase Order not found' });
+         }
+ 
+         // Validate OrderItem IDs
+         const orderItemIds = grnItems.map(item => item.orderItemId);
+         const orderItems = await OrderItem.findAll({ where: { id: orderItemIds, poId } });
+ 
+         if (orderItems.length !== orderItemIds.length) {
+             const invalidIds = orderItemIds.filter(id => !orderItems.some(item => item.id === id));
+             return res.status(400).json({ message: `OrderItem IDs not found for PO ${poId}: ${invalidIds.join(', ')}` });
+         }
+ 
+         // Check if any order item has remaining quantity to receive
+         const itemsWithRemainingQuantity = await Promise.all(orderItems.map(async (orderItem) => {
+             const previousReceived = await GRNItem.sum('receivedQuantity', {
+                 where: { orderItemId: orderItem.id }
+             });
+             const remainingQuantity = orderItem.quantity - (previousReceived || 0);
+             return { orderItemId: orderItem.id, remainingQuantity };
+         }));
+ 
+         const validGrnItems = grnItems.filter(item => {
+             const itemInfo = itemsWithRemainingQuantity.find(i => i.orderItemId === item.orderItemId);
+             return itemInfo && itemInfo.remainingQuantity > 0 && item.receivedQuantity > 0;
+         });
+ 
+         if (validGrnItems.length === 0) {
+             return res.status(400).json({
+                 message: 'No valid items to receive. All items are either fully received or have invalid received quantities.'
+             });
+         }
+ 
+         const transaction = await sequelize.transaction();
+         try {
+             // Create GRN
+             const grn = await GRN.create({
+                 poId,
+                 grnNo,
+                 grnDate,
+                 challanNo,
+                 challanDate,
+                 document,
+                 remark
+             }, { transaction });
+ 
+             // Create GRN Items
+             const grnItemData = await Promise.all(validGrnItems.map(async (item) => {
+                 const orderItem = orderItems.find(oi => oi.id === item.orderItemId);
+                 const previousReceived = await GRNItem.sum('receivedQuantity', {
+                     where: { orderItemId: item.orderItemId },
+                     transaction
+                 });
+                 const remainingQuantity = orderItem.quantity - (previousReceived || 0);
+ 
+                 // Cap received quantity to remaining quantity
+                 const receivedQuantity = Math.min(item.receivedQuantity, remainingQuantity);
+                 const rejectedQuantity = item.receivedQuantity > remainingQuantity ? item.receivedQuantity - remainingQuantity : 0;
+ 
+                 return {
+                     grnId: grn.id,
+                     orderItemId: item.orderItemId,
+                     receivedQuantity,
+                     rejectedQuantity
+                 };
+             }));
+ 
+             await GRNItem.bulkCreate(grnItemData, { transaction });
+ 
+             // Stock Update in StockStorage
+             for (const item of grnItemData) {
+                 const orderItem = orderItems.find(oi => oi.id === item.orderItemId);
+                 const stockRecord = await StockStorage.findOne({
+                     where: {
+                         poId,
+                         grnId: grn.id,
+                         itemId: orderItem.itemId
+                     },
+                     transaction
+                 });
+ 
+                 if (stockRecord) {
+                     // Update existing stock record
+                     await stockRecord.update({
+                         quantity: stockRecord.quantity + item.receivedQuantity,
+                         remark: remark || stockRecord.remark
+                     }, { transaction });
+                 } else {
+                     // Create new stock record
+                     await StockStorage.create({
+                         poId,
+                         grnId: grn.id,
+                         qGRNId: null,
+                         itemId: orderItem.itemId,
+                         quantity: item.receivedQuantity,
+                         remark: remark || null
+                     }, { transaction });
+                 }
+             }
+ 
+             await transaction.commit();
+ 
+             // Fetch the created GRN with its items
+             const createdGRN = await GRN.findByPk(grn.id, {
+                 include: [{ model: GRNItem, as: 'grnItems' }]
+             });
+ 
+             res.status(201).json(createdGRN);
+         } catch (error) {
+             await transaction.rollback();
+             throw error;
+         }
+     } catch (error) {
+         console.error('Error creating GRN:', error);
+         res.status(500).json({ message: 'Internal server error', error: error.message });
+     }
+ };
 
 
 const updateGRN = async (req, res) => {
