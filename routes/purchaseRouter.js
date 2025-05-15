@@ -16,7 +16,7 @@ const ReturnController = require('../controller/distribution/ReturnController');
 router.get('/', purchaseOrderController.getAllPurchaseOrders);
 router.get('/allgrns', GRNController.getAllGRNs);
 router.get('/allinvoices', invoiceController.getAllInvoices);
-router.get('/quick-grns', QuickGRNController.getAllQuickGRNs);
+router.get('/allquick-grns', QuickGRNController.getAllQuickGRNs);
 router.get('/quick-invoices', QuickInvoiceController.getAllQuickInvoices);
 router.get('/stock', StockStorageController.getAllStockStorage);
 router.get('/distributions', DistributionController.getAllDistributions);

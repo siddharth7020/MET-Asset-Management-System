@@ -3,6 +3,41 @@ const QuickGRNItem = require('../../models/purchase/quickGRNItem');
 const StockStorage = require('../../models/distribution/stockStorage'); // Import StockStorage model
 const sequelize = require('../../config/database'); // Import sequelize for transactions
 
+
+const getAllQuickGRNs = async (req, res) => {
+    try {
+        const quickGRNs = await QuickGRN.findAll(
+            {
+                include: [{ model: QuickGRNItem, as: 'items' }]
+            }
+        );
+
+        res.status(200).json(quickGRNs);
+    } catch (error) {
+        console.error('Error fetching Quick GRNs:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+const getQuickGRNById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const quickGRN = await QuickGRN.findByPk(id, {
+            include: [{ model: QuickGRNItem, as: 'items' }]
+        });
+
+        if (!quickGRN) {
+            return res.status(404).json({ message: 'Quick GRN not found' });
+        }
+
+        res.status(200).json(quickGRN);
+    } catch (error) {
+        console.error('Error fetching Quick GRN:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+
 // Create QuickGRN with Items and Stock Storage
 const createQuickGRN = async (req, res) => {
     try {
@@ -102,36 +137,7 @@ const createQuickGRN = async (req, res) => {
     }
 };
 
-const getAllQuickGRNs = async (req, res) => {
-    try {
-        const quickGRNs = await QuickGRN.findAll();
-
-        res.status(200).json(quickGRNs);
-    } catch (error) {
-        console.error('Error fetching Quick GRNs:', error);
-        res.status(500).json({ message: 'Internal server error', error: error.message });
-    }
-};
-
-
 // Fetch QuickGRN by ID with associated items
-const getQuickGRNById = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const quickGRN = await QuickGRN.findByPk(id, {
-            include: [{ model: QuickGRNItem, as: 'items' }]
-        });
-
-        if (!quickGRN) {
-            return res.status(404).json({ message: 'Quick GRN not found' });
-        }
-
-        res.status(200).json(quickGRN);
-    } catch (error) {
-        console.error('Error fetching Quick GRN:', error);
-        res.status(500).json({ message: 'Internal server error', error: error.message });
-    }
-};
 
 // Update QuickGRN with Items and Stock Storage
 const updateQuickGRN = async (req, res) => {
