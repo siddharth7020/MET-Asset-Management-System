@@ -113,7 +113,7 @@ const createQuickInvoice = async (req, res) => {
 const getAllQuickInvoices = async (req, res) => {
     try {
         const invoices = await QuickInvoice.findAll({
-            order: [['createdAt', 'DESC']]
+            include: [{ model: QuickInvoiceItem, as: 'quickInvoiceItems' }]
         });
         return res.status(200).json(invoices);
     } catch (error) {
