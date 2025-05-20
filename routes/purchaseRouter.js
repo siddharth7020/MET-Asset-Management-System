@@ -18,18 +18,18 @@ router.get('/allgrns', GRNController.getAllGRNs);
 router.get('/allinvoices', invoiceController.getAllInvoices);
 router.get('/allquick-grns', QuickGRNController.getAllQuickGRNs);
 router.get('/allquickinvoices', QuickInvoiceController.getAllQuickInvoices);
-router.get('/stock', StockStorageController.getAllStockStorage);
-router.get('/distributions', DistributionController.getAllDistributions);
+router.get('/allstock', StockStorageController.getAllStockStorage);
+router.get('/alldistributions', DistributionController.getAllDistributions);
 router.get('/distributions/:distributionId/returns', ReturnController.getAllReturns);
 
 // GET by ID routes
 router.get('/:poId', purchaseOrderController.getPurchaseOrderById);
+router.get('/stock/:itemId', StockStorageController.getStockStorageByItemId);
 router.get('/grn/:id', GRNController.getGRNById);
 router.get('/invoices/:id', invoiceController.getInvoice);
 router.get('/:poId/invoices', invoiceController.getPODetailsForInvoice);
 router.get('/quick-grns/:id', QuickGRNController.getQuickGRNById);
 router.get('/quick-invoices/:id', QuickInvoiceController.getQuickInvoiceById);
-router.get('/stock/:itemId', StockStorageController.getStockStorageByItemId);
 router.get('/distributions/:id', DistributionController.getDistributionById);
 router.get('/distributions/:distributionId/returns/:returnId', ReturnController.getReturnById);
 
@@ -39,8 +39,7 @@ router.post('/:poId/creategrn', GRNController.createGRN);
 router.post('/invoice/create', invoiceController.createInvoice);
 router.post('/quick-grns', QuickGRNController.createQuickGRN);
 router.post('/quickinvoice/create', QuickInvoiceController.createQuickInvoice);
-router.post('/:poId/grns/:grnId/stock', StockStorageController.updateStockStorage);
-router.post('/distributions', DistributionController.createDistribution);
+router.post('/distribution/create', DistributionController.createDistribution);
 router.post('/distributions/:distributionId/returns', ReturnController.createReturn);
 
 // PUT update routes

@@ -6,60 +6,14 @@ const StockStorage = require('../../models/distribution/stockStorage');
 const sequelize = require('../../config/database');
 
 
-
-// CREATE or UPDATE StockStorage when GRN is processed
-const updateStockStorage = async (req, res) => {
+const getAllStockStorage = async (req, res) => {
     try {
-        const { poId, grnId } = req.params;
-        const { grnItems } = req.body;
-
-        // Validate PurchaseOrder and GRN
-        const purchaseOrder = await PurchaseOrder.findByPk(poId);
-        if (!purchaseOrder) {
-            return res.status(404).json({ message: 'Purchase Order not found' });
-        }
-        const grn = await GRN.findOne({ where: { id: grnId, poId } });
-        if (!grn) {
-            return res.status(404).json({ message: 'GRN not found' });
-        }
-
-        // Process each GRNItem
-        if (grnItems && grnItems.length > 0) {
-            for (const item of grnItems) {
-                const grnItem = await GRNItem.findByPk(item.orderItemId);
-                if (!grnItem) {
-                    return res.status(400).json({ message: `GRNItem with orderItemId ${item.orderItemId} not found` });
-                }
-
-                // Check if StockStorage entry exists
-                const stockEntry = await StockStorage.findOne({
-                    where: { poId, grnId, itemId: grnItem.orderItemId }
-                });
-
-                if (stockEntry) {
-                    // Update existing entry
-                    await stockEntry.update({
-                        quantity: item.receivedQuantity,
-                        remark: item.remark || stockEntry.remark
-                    });
-                } else {
-                    // Create new entry
-                    await StockStorage.create({
-                        poId,
-                        grnId,
-                        itemId: grnItem.orderItemId,
-                        quantity: item.receivedQuantity,
-                        remark: item.remark
-                    });
-                }
-            }
-        }
-
-        // Fetch updated stock for this GRN
-        const stock = await StockStorage.findAll({ where: { grnId } });
+        const stock = await StockStorage.findAll();
+        console.log('All StockStorage:', stock);
+        
         res.status(200).json(stock);
     } catch (error) {
-        console.error('Error updating StockStorage:', error);
+        console.error('Error fetching StockStorage:', error);
         res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
@@ -125,18 +79,8 @@ const getStockStorageByItemId = async (req, res) => {
 };
 
 // get all stock storage
-const getAllStockStorage = async (req, res) => {
-    try {
-        const stock = await StockStorage.findAll();
-        res.status(200).json(stock);
-    } catch (error) {
-        console.error('Error fetching StockStorage:', error);
-        res.status(500).json({ message: 'Internal server error', error: error.message });
-    }
-};
 
 module.exports = {
-    updateStockStorage,
     getStockStorageByItemId,
     getAllStockStorage
 };
