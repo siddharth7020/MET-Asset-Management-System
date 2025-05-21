@@ -2,7 +2,7 @@ const Invoice = require('../../models/purchase/invoice'); // Adjust the path as 
 const InvoiceItem = require('../../models/purchase/invoiceItem'); // Adjust the path as necessary
 const PurchaseOrder = require('../../models/purchase/PurchaseOrder'); // Adjust the path as necessary
 const OrderItem = require('../../models/purchase/OrderItem'); // Adjust the path as necessary
-const { Sequelize } = require('sequelize');
+const { Sequelize, Op } = require('sequelize');
 
 
 //get all invoices
@@ -27,7 +27,7 @@ const getAllInvoices = async (req, res) => {
 // Create Invoice
 const createInvoice = async (req, res) => {
     try {
-        const { poId, invoiceNo, invoiceDate, paymentDetails, items } = req.body;
+        const { poId, invoiceDate = new Date(), paymentDetails, items } = req.body;
 
         // Fetch PO details
         const purchaseOrder = await PurchaseOrder.findByPk(poId, {
@@ -37,6 +37,36 @@ const createInvoice = async (req, res) => {
         if (!purchaseOrder) {
             return res.status(404).json({ message: 'Purchase Order not found' });
         }
+
+        // Generate invoiceNo in format IN-DDMMYY-01
+        const date = new Date(invoiceDate);
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are 0-based
+        const year = String(date.getFullYear()).slice(-2); // Last two digits of year
+        const dateString = `${day}${month}${year}`; // Format: DDMMYY
+
+        // Find the last invoice number for the same date to increment the sequence
+        const lastInvoice = await Invoice.findOne({
+            where: {
+                invoiceNo: {
+                    [Op.like]: `IN-${dateString}-%`
+                }
+            },
+            order: [['invoiceNo', 'DESC']]
+        });
+
+        // Extract the sequence number and increment it
+        let sequence = 1;
+        if (lastInvoice && lastInvoice.invoiceNo) {
+            const parts = lastInvoice.invoiceNo.split('-');
+            if (parts.length === 3 && !isNaN(parts[2])) {
+                const lastSequence = parseInt(parts[2], 10);
+                sequence = lastSequence + 1;
+            } else {
+                console.warn(`Invalid invoiceNo format found: ${lastInvoice.invoiceNo}. Starting sequence at 1.`);
+            }
+        }
+        const invoiceNo = `IN-${dateString}-${String(sequence).padStart(2, '0')}`;
 
         // Calculate totals
         let subtotal = 0;

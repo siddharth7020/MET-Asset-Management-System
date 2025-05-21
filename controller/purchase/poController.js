@@ -2,13 +2,13 @@
 const PurchaseOrder = require('../../models/purchase/PurchaseOrder');
 const OrderItem = require('../../models/purchase/OrderItem');
 const sequelize = require('../../config/database');
+const { Op } = require('sequelize');
 
 // CREATE a new Purchase Order with Order Items
 const createPurchaseOrder = async (req, res) => {
     try {
         const {
-            poDate,
-            poNo,
+            poDate = new Date(), // Default to current date if not provided
             instituteId,
             financialYearId,
             vendorId,
@@ -18,6 +18,36 @@ const createPurchaseOrder = async (req, res) => {
             orderItems // Array of { itemId, quantity, rate, discount }
         } = req.body;
 
+        // Generate poNo in format PO-DDMMYY-01
+        const date = new Date(poDate);
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are 0-based
+        const year = String(date.getFullYear()).slice(-2); // Last two digits of year
+        const dateString = `${day}${month}${year}`; // Format: DDMMYY
+
+        // Find the last PO number for the same date to increment the sequence
+        const lastPO = await PurchaseOrder.findOne({
+            where: {
+                poNo: {
+                    [Op.like]: `PO-${dateString}-%`
+                }
+            },
+            order: [['poNo', 'DESC']]
+        });
+
+        // Extract the sequence number and increment it
+        let sequence = 1;
+        if (lastPO && lastPO.poNo) {
+            const parts = lastPO.poNo.split('-');
+            if (parts.length === 3 && !isNaN(parts[2])) {
+                const lastSequence = parseInt(parts[2], 10);
+                sequence = lastSequence + 1;
+            } else {
+                console.warn(`Invalid poNo format found: ${lastPO.poNo}. Starting sequence at 1.`);
+            }
+        }
+        const poNo = `PO-${dateString}-${String(sequence).padStart(2, '0')}`;
+
         // Create Purchase Order
         const purchaseOrder = await PurchaseOrder.create({
             poDate,
@@ -25,7 +55,7 @@ const createPurchaseOrder = async (req, res) => {
             instituteId,
             financialYearId,
             vendorId,
-            document: JSON.stringify(req.body.document), // <--- Convert to string
+            document: JSON.stringify(document), // Convert to string
             requestedBy,
             remark
         });
@@ -55,7 +85,6 @@ const createPurchaseOrder = async (req, res) => {
         res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
-
 // READ all Purchase Orders
 const getAllPurchaseOrders = async (req, res) => {
     try {
