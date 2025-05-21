@@ -146,9 +146,7 @@ const createReturn = async (req, res) => {
 // get all returns
 const getAllReturns = async (req, res) => {
     try {
-        const returns = await Return.findAll({
-            include: [{ model: ReturnItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] }]
-        });
+        const returns = await Return.findAll();
         res.json(returns);
     } catch (error) {
         console.error('Error fetching Returns:', error);

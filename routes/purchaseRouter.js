@@ -20,7 +20,7 @@ router.get('/allquick-grns', QuickGRNController.getAllQuickGRNs);
 router.get('/allquickinvoices', QuickInvoiceController.getAllQuickInvoices);
 router.get('/allstock', StockStorageController.getAllStockStorage);
 router.get('/alldistributions', DistributionController.getAllDistributions);
-router.get('/distributions/:distributionId/returns', ReturnController.getAllReturns);
+router.get('/allreturns', ReturnController.getAllReturns);
 
 // GET by ID routes
 router.get('/:poId', purchaseOrderController.getPurchaseOrderById);
@@ -31,7 +31,7 @@ router.get('/:poId/invoices', invoiceController.getPODetailsForInvoice);
 router.get('/quick-grns/:id', QuickGRNController.getQuickGRNById);
 router.get('/quick-invoices/:id', QuickInvoiceController.getQuickInvoiceById);
 router.get('/distributions/:id', DistributionController.getDistributionById);
-router.get('/distributions/:distributionId/returns/:returnId', ReturnController.getReturnById);
+router.get('/returns/:id', ReturnController.getReturnById);
 
 // POST create routes
 router.post('/create', purchaseOrderController.createPurchaseOrder);
@@ -40,7 +40,7 @@ router.post('/invoice/create', invoiceController.createInvoice);
 router.post('/quick-grns', QuickGRNController.createQuickGRN);
 router.post('/quickinvoice/create', QuickInvoiceController.createQuickInvoice);
 router.post('/distribution/create', DistributionController.createDistribution);
-router.post('/distributions/:distributionId/returns', ReturnController.createReturn);
+router.post('/returns/create', ReturnController.createReturn);
 
 // PUT update routes
 router.put('/:poId', purchaseOrderController.updatePurchaseOrder);
