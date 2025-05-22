@@ -1,4 +1,4 @@
-const { Op } = require('sequelize'); // Add this import
+const { Op } = require('sequelize');
 const Distribution = require('../../models/distribution/Distribution');
 const DistributionItem = require('../../models/distribution/DistributionItem');
 const Item = require('../../models/master/item');
@@ -6,7 +6,6 @@ const StockStorage = require('../../models/distribution/stockStorage');
 const FinancialYear = require('../../models/master/financialYear');
 const Institute = require('../../models/master/institute');
 const sequelize = require('../../config/database');
-
 
 // GET all Distributions
 const getAllDistributions = async (req, res) => {
@@ -24,12 +23,56 @@ const getAllDistributions = async (req, res) => {
 // CREATE a Stock Distribution
 const createDistribution = async (req, res) => {
     try {
-        const { financialYearId, instituteId, employeeName, location, documents, remark, items } = req.body;
+        const {
+            financialYearId,
+            instituteId,
+            employeeName,
+            location,
+            distributionDate = new Date(), // Default to current date if not provided
+            documents,
+            remark,
+            items
+        } = req.body;
 
         // Validate required fields
-        if (!financialYearId || !instituteId || !employeeName || !location || !items || !Array.isArray(items) || items.length === 0) {
-            return res.status(400).json({ message: 'financialYearId, instituteId, employeeName, location, and items are required' });
+        if (!financialYearId || !instituteId || !employeeName || !location || !distributionDate || !items || !Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ message: 'financialYearId, instituteId, employeeName, location, distributionDate, and items are required' });
         }
+
+        // Validate distributionDate
+        if (isNaN(Date.parse(distributionDate))) {
+            return res.status(400).json({ message: 'Invalid distributionDate format' });
+        }
+
+        // Generate distributionNo in format DIS-DDMMYY-01
+        const date = new Date(distributionDate);
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are 0-based
+        const year = String(date.getFullYear()).slice(-2); // Last two digits of year
+        const dateString = `${day}${month}${year}`; // Format: DDMMYY
+
+        // Find the last distribution number for the same date to increment the sequence
+        const lastDistribution = await Distribution.findOne({
+            where: {
+                distributionNo: {
+                    [Op.like]: `DIS-${dateString}-%`
+                }
+            },
+            order: [['distributionNo', 'DESC']]
+        });
+
+        // Extract the sequence number and increment it
+        let sequence = 1;
+        if (lastDistribution && lastDistribution.distributionNo) {
+            const parts = lastDistribution.distributionNo.split('-');
+            if (parts.length === 3 && !isNaN(parts[2])) {
+                const lastSequence = parseInt(parts[2], 10);
+                sequence = lastSequence + 1;
+            } else {
+                console.warn(`Invalid distributionNo format found: ${lastDistribution.distributionNo}. Starting sequence at 1.`);
+            }
+        }
+        const distributionNo = `DIS-${dateString}-${String(sequence).padStart(2, '0')}`;
 
         // Validate financialYearId and instituteId
         const financialYear = await FinancialYear.findByPk(financialYearId);
@@ -77,6 +120,8 @@ const createDistribution = async (req, res) => {
                 instituteId,
                 employeeName,
                 location,
+                distributionDate,
+                distributionNo,
                 documents,
                 remark
             }, { transaction });
@@ -93,8 +138,8 @@ const createDistribution = async (req, res) => {
             for (const item of items) {
                 let remainingQuantity = item.issueQuantity;
                 const stockRecords = await StockStorage.findAll({
-                    where: { itemId: item.itemId, quantity: { [Op.gt]: 0 } }, // Fixed: Use Op.gt
-                    order: [['createdAt', 'ASC']], // Oldest first (FIFO)
+                    where: { itemId: item.itemId, quantity: { [Op.gt]: 0 } },
+                    order: [['createdAt', 'ASC']],
                     transaction
                 });
 
@@ -152,7 +197,7 @@ const createDistribution = async (req, res) => {
 const updateDistribution = async (req, res) => {
     try {
         const { id } = req.params;
-        const { financialYearId, instituteId, employeeName, location, documents, remark, items } = req.body;
+        const { financialYearId, instituteId, employeeName, location, distributionDate, distributionNo, documents, remark, items } = req.body;
 
         // Check if distribution exists
         const distribution = await Distribution.findByPk(id, {
@@ -173,6 +218,19 @@ const updateDistribution = async (req, res) => {
             const institute = await Institute.findByPk(instituteId);
             if (!institute) {
                 return res.status(404).json({ message: `Institute with ID ${instituteId} not found` });
+            }
+        }
+
+        // Validate distributionDate if provided
+        if (distributionDate && isNaN(Date.parse(distributionDate))) {
+            return res.status(400).json({ message: 'Invalid distributionDate format' });
+        }
+
+        // Validate distributionNo uniqueness if provided
+        if (distributionNo && distributionNo !== distribution.distributionNo) {
+            const existingDistribution = await Distribution.findOne({ where: { distributionNo } });
+            if (existingDistribution) {
+                return res.status(400).json({ message: `Distribution number ${distributionNo} already exists` });
             }
         }
 
@@ -202,6 +260,8 @@ const updateDistribution = async (req, res) => {
                 instituteId: instituteId || distribution.instituteId,
                 employeeName: employeeName || distribution.employeeName,
                 location: location || distribution.location,
+                distributionDate: distributionDate || distribution.distributionDate,
+                distributionNo: distributionNo || distribution.distributionNo,
                 documents: documents !== undefined ? documents : distribution.documents,
                 remark: remark !== undefined ? remark : distribution.remark
             }, { transaction });
@@ -228,7 +288,7 @@ const updateDistribution = async (req, res) => {
 
                 for (const item of items) {
                     const oldQuantity = existingItems[item.itemId] || 0;
-                    const quantityDiff = item.issueQuantity - oldQuantity; // Positive: need more stock, Negative: restore stock
+                    const quantityDiff = item.issueQuantity - oldQuantity;
                     if (quantityDiff > 0) {
                         const stock = stockEntries.find(se => se.itemId === item.itemId);
                         const totalStock = stock ? parseInt(stock.getDataValue('totalStock')) : 0;
@@ -242,7 +302,7 @@ const updateDistribution = async (req, res) => {
                 // Restore stock for removed or reduced items
                 for (const existingItem of distribution.items) {
                     const newQuantity = newItems[existingItem.itemId] || 0;
-                    const quantityDiff = existingItem.issueQuantity - newQuantity; // Positive: restore stock
+                    const quantityDiff = existingItem.issueQuantity - newQuantity;
                     if (quantityDiff > 0) {
                         const stockRecords = await StockStorage.findAll({
                             where: { itemId: existingItem.itemId },
@@ -278,7 +338,7 @@ const updateDistribution = async (req, res) => {
                 // Deduct stock for new or increased items
                 for (const item of items) {
                     const oldQuantity = existingItems[item.itemId] || 0;
-                    const quantityDiff = item.issueQuantity - oldQuantity; // Positive: deduct stock
+                    const quantityDiff = item.issueQuantity - oldQuantity;
                     if (quantityDiff > 0) {
                         let remainingQuantity = quantityDiff;
                         const stockRecords = await StockStorage.findAll({
@@ -355,16 +415,10 @@ const getDistributionById = async (req, res) => {
     }
 };
 
-
-
-
-
-
 // Export the functions
 module.exports = {
     createDistribution,
     updateDistribution,
     getDistributionById,
     getAllDistributions,
-  
 };

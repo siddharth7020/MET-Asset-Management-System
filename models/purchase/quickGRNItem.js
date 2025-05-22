@@ -38,16 +38,6 @@ const QuickGRNItem = sequelize.define('quickGRNItem', {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false
     },
-    receivedQuantity: {
-        type: DataTypes.INTEGER,
-        allowNull: false,
-        validate: { min: 0 }
-    },
-    rejectedQuantity: {
-        type: DataTypes.INTEGER,
-        defaultValue: 0,
-        validate: { min: 0 }
-    }
 }, {
     tableName: 'quick_grn_item',
     timestamps: true

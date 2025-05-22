@@ -7,6 +7,15 @@ const Distribution = sequelize.define('Distribution', {
         autoIncrement: true,
         primaryKey: true
     },
+    distributionDate: {
+        type: DataTypes.DATE,
+        allowNull: false
+    },
+    distributionNo: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        unique: true
+    },
     financialYearId: {
         type: DataTypes.INTEGER,
         allowNull: false
