@@ -118,7 +118,7 @@ const createGRN = async (req, res) => {
 
         const validGrnItems = grnItems.filter(item => {
             const itemInfo = itemsWithRemainingQuantity.find(i => i.orderItemId === item.orderItemId);
-            return itemInfo && itemInfo.remainingQuantity > 0 && item.receivedQuantity > 0;
+            return itemInfo && itemInfo.remainingQuantity > 0 && item.receivedQuantity >= 0;
         });
 
         if (validGrnItems.length === 0) {
@@ -151,7 +151,12 @@ const createGRN = async (req, res) => {
                 const remainingQuantity = orderItem.quantity - (previousReceived || 0);
 
                 const receivedQuantity = Math.min(item.receivedQuantity, remainingQuantity);
-                const rejectedQuantity = item.rejectedQuantity || 0;
+                const rejectedQuantity = remainingQuantity - receivedQuantity;
+
+                // Validate receivedQuantity
+                if (receivedQuantity < 0) {
+                    throw new Error(`Invalid receivedQuantity (${receivedQuantity}) for orderItemId: ${item.orderItemId}`);
+                }
 
                 return {
                     grnId: grn.id,
@@ -213,7 +218,7 @@ const createGRN = async (req, res) => {
 
         res.status(201).json(createdGRN);
     } catch (error) {
-        console.error('Error creating GRN:', error);
+        console.error('Error creating GRN:', error, error.stack);
         res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
@@ -313,9 +318,7 @@ const updateGRN = async (req, res) => {
                         });
                     }
 
-                    const rejectedQuantity = item.rejectedQuantity !== undefined
-                        ? item.rejectedQuantity
-                        : 0;
+                    const rejectedQuantity = remainingQuantity - item.receivedQuantity;
 
                     const grnItemData = {
                         grnId: grn.id,
@@ -434,7 +437,7 @@ const updateGRN = async (req, res) => {
             throw error;
         }
     } catch (error) {
-        console.error('Error updating GRN:', error);
+        console.error('Error updating GRN:', error, error.stack);
         res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
@@ -486,7 +489,7 @@ const deleteGRN = async (req, res) => {
             throw error;
         }
     } catch (error) {
-        console.error('Error deleting GRN:', error);
+        console.error('Error deleting GRN:', error, error.stack);
         res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
