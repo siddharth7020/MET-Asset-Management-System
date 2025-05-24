@@ -16,6 +16,10 @@ const InvoiceItem = sequelize.define('InvoiceItem', {
         type: DataTypes.INTEGER,
         allowNull: false
     },
+    itemId: {
+        type: DataTypes.INTEGER,
+        allowNull: false
+    },
     quantity: {
         type: DataTypes.INTEGER,
         allowNull: false
