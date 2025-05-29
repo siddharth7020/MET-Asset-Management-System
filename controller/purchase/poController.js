@@ -1,47 +1,78 @@
-
 const PurchaseOrder = require('../../models/purchase/PurchaseOrder');
 const OrderItem = require('../../models/purchase/OrderItem');
 const sequelize = require('../../config/database');
 const { Op } = require('sequelize');
+const path = require('path');
+const fs = require('fs').promises;
 
 // CREATE a new Purchase Order with Order Items
 const createPurchaseOrder = async (req, res) => {
     try {
         const {
-            poDate = new Date(), // Default to current date if not provided
+            poDate = new Date(),
             instituteId,
             financialYearId,
             vendorId,
-            document,
             requestedBy,
             remark,
-            orderItems // Array of { itemId, quantity, rate, discount }
+            orderItems: orderItemsRaw // Renamed to avoid confusion
         } = req.body;
+
+        // Parse orderItems if it's a JSON string
+        let orderItems;
+        try {
+            orderItems = typeof orderItemsRaw === 'string' ? JSON.parse(orderItemsRaw) : orderItemsRaw;
+        } catch (parseError) {
+            return res.status(400).json({ message: 'Invalid orderItems format', error: parseError.message });
+        }
+
+        // Validate orderItems is an array
+        if (!Array.isArray(orderItems)) {
+            return res.status(400).json({ message: 'orderItems must be an array' });
+        }
+
+        // Validate orderItems content
+        if (orderItems.length === 0) {
+            return res.status(400).json({ message: 'At least one order item is required' });
+        }
+        for (const item of orderItems) {
+            if (!item.itemId || !item.quantity || !item.rate) {
+                return res.status(400).json({ message: 'Each order item must have itemId, quantity, and rate' });
+            }
+        }
+
+        // Handle file upload
+        let documentPath = null;
+        if (req.files && req.files.document) {
+            const document = req.files.document;
+            const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+            if (!allowedTypes.includes(document.mimetype)) {
+                return res.status(400).json({ message: 'Invalid file type. Only PDF, JPEG, and PNG are allowed.' });
+            }
+            const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+            const fileExtension = path.extname(document.name);
+            const fileName = `document-${uniqueSuffix}${fileExtension}`;
+            documentPath = path.join('uploads', fileName);
+            await fs.mkdir(path.join(__dirname, '../../uploads'), { recursive: true });
+            await document.mv(path.join(__dirname, '../../', documentPath));
+        }
 
         // Generate poNo in format PO-DDMMYY-01
         const date = new Date(poDate);
         const day = String(date.getDate()).padStart(2, '0');
-        const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are 0-based
-        const year = String(date.getFullYear()).slice(-2); // Last two digits of year
-        const dateString = `${day}${month}${year}`; // Format: DDMMYY
-
-        // Find the last PO number for the same date to increment the sequence
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = String(date.getFullYear()).slice(-2);
+        const dateString = `${day}${month}${year}`;
         const lastPO = await PurchaseOrder.findOne({
-            where: {
-                poNo: {
-                    [Op.like]: `PO-${dateString}-%`
-                }
-            },
+            where: { poNo: { [Op.like]: `PO-${dateString}-%` } },
             order: [['poNo', 'DESC']]
         });
 
-        // Extract the sequence number and increment it
         let sequence = 1;
         if (lastPO && lastPO.poNo) {
             const parts = lastPO.poNo.split('-');
             if (parts.length === 3 && !isNaN(parts[2])) {
-                const lastSequence = parseInt(parts[2], 10);
-                sequence = lastSequence + 1;
+                sequence = parseInt(parts[2], 10) + 1;
             } else {
                 console.warn(`Invalid poNo format found: ${lastPO.poNo}. Starting sequence at 1.`);
             }
@@ -55,7 +86,7 @@ const createPurchaseOrder = async (req, res) => {
             instituteId,
             financialYearId,
             vendorId,
-            document: JSON.stringify(document), // Convert to string
+            document: documentPath,
             requestedBy,
             remark
         });
@@ -85,46 +116,10 @@ const createPurchaseOrder = async (req, res) => {
         res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
-// READ all Purchase Orders
-const getAllPurchaseOrders = async (req, res) => {
-    try {
-        const purchaseOrders = await PurchaseOrder.findAll({
-            include: [
-                { model: OrderItem, as: 'orderItems' }
-            ]
-        });
-        res.status(200).json(purchaseOrders);
-    } catch (error) {
-        console.error('Error fetching Purchase Orders:', error);
-        res.status(500).json({ message: 'Internal server error', error: error.message });
-    }
-};
-
-// READ a single Purchase Order by poId
-const getPurchaseOrderById = async (req, res) => {
-    try {
-        const { poId } = req.params;
-        const purchaseOrder = await PurchaseOrder.findByPk(poId, {
-            include: [
-                { model: OrderItem, as: 'orderItems' },
-            ]
-        });
-        console.log('Fetching Purchase Order:', purchaseOrder);
-
-        if (!purchaseOrder) {
-            return res.status(404).json({ message: 'Purchase Order not found' });
-        }
-
-        res.status(200).json(purchaseOrder);
-    } catch (error) {
-        console.error('Error fetching Purchase Order:', error);
-        res.status(500).json({ message: 'Internal server error', error: error.message });
-    }
-};
 
 // UPDATE a Purchase Order
 const updatePurchaseOrder = async (req, res) => {
-    const t = await sequelize.transaction(); // Start a transaction
+    const t = await sequelize.transaction();
     try {
         const { poId } = req.params;
         const {
@@ -133,12 +128,27 @@ const updatePurchaseOrder = async (req, res) => {
             instituteId,
             financialYearId,
             vendorId,
-            document,
             requestedBy,
             remark,
-            orderItems
+            orderItems: orderItemsRaw
         } = req.body;
 
+        // Parse orderItems if it's a JSON string
+        let orderItems;
+        try {
+            orderItems = typeof orderItemsRaw === 'string' ? JSON.parse(orderItemsRaw) : orderItemsRaw;
+        } catch (parseError) {
+            await t.rollback();
+            return res.status(400).json({ message: 'Invalid orderItems format', error: parseError.message });
+        }
+
+        // Validate orderItems is an array
+        if (!Array.isArray(orderItems)) {
+            await t.rollback();
+            return res.status(400).json({ message: 'orderItems must be an array' });
+        }
+
+        let documentPath = null;
         const purchaseOrder = await PurchaseOrder.findByPk(poId, {
             include: [{ model: OrderItem, as: 'orderItems' }],
             transaction: t,
@@ -148,6 +158,31 @@ const updatePurchaseOrder = async (req, res) => {
             return res.status(404).json({ message: 'Purchase Order not found' });
         }
 
+        // Handle file upload
+        if (req.files && req.files.document) {
+            const document = req.files.document;
+            const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+            if (!allowedTypes.includes(document.mimetype)) {
+                await t.rollback();
+                return res.status(400).json({ message: 'Invalid file type. Only PDF, JPEG, and PNG are allowed.' });
+            }
+            const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+            const fileExtension = path.extname(document.name);
+            const fileName = `document-${uniqueSuffix}${fileExtension}`;
+            documentPath = path.join('uploads', fileName);
+            await fs.mkdir(path.join(__dirname, '../../Uploads'), { recursive: true });
+            await document.mv(path.join(__dirname, '../../', documentPath));
+            if (purchaseOrder.document) {
+                try {
+                    await fs.unlink(path.join(__dirname, '../../', purchaseOrder.document));
+                } catch (err) {
+                    console.warn(`Failed to delete old file: ${purchaseOrder.document}`, err);
+                }
+            }
+        } else {
+            documentPath = purchaseOrder.document;
+        }
+
         await purchaseOrder.update(
             {
                 poDate,
@@ -155,7 +190,7 @@ const updatePurchaseOrder = async (req, res) => {
                 instituteId,
                 financialYearId,
                 vendorId,
-                document,
+                document: documentPath,
                 requestedBy,
                 remark,
             },
@@ -207,11 +242,47 @@ const updatePurchaseOrder = async (req, res) => {
             transaction: t,
         });
 
-        await t.commit(); // Commit the transaction
+        await t.commit();
         res.status(200).json(updatedOrder);
     } catch (error) {
-        await t.rollback(); // Rollback on error
+        await t.rollback();
         console.error('Error updating Purchase Order:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+// READ all Purchase Orders
+const getAllPurchaseOrders = async (req, res) => {
+    try {
+        const purchaseOrders = await PurchaseOrder.findAll({
+            include: [
+                { model: OrderItem, as: 'orderItems' }
+            ]
+        });
+        res.status(200).json(purchaseOrders);
+    } catch (error) {
+        console.error('Error fetching Purchase Orders:', error);
+        res.status(500).json({ message: 'Internal server error', error: error.message });
+    }
+};
+
+// READ a single Purchase Order by poId
+const getPurchaseOrderById = async (req, res) => {
+    try {
+        const { poId } = req.params;
+        const purchaseOrder = await PurchaseOrder.findByPk(poId, {
+            include: [
+                { model: OrderItem, as: 'orderItems' },
+            ]
+        });
+
+        if (!purchaseOrder) {
+            return res.status(404).json({ message: 'Purchase Order not found' });
+        }
+
+        res.status(200).json(purchaseOrder);
+    } catch (error) {
+        console.error('Error fetching Purchase Order:', error);
         res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
@@ -226,7 +297,14 @@ const deletePurchaseOrder = async (req, res) => {
             return res.status(404).json({ message: 'Purchase Order not found' });
         }
 
-        // Delete associated Order Items and GRNs (cascade will handle this if configured in DB)
+        if (purchaseOrder.document) {
+            try {
+                await fs.unlink(path.join(__dirname, '../../', purchaseOrder.document));
+            } catch (err) {
+                console.warn(`Failed to delete file: ${purchaseOrder.document}`, err);
+            }
+        }
+
         await purchaseOrder.destroy();
         res.status(200).json({ message: 'Purchase Order deleted successfully' });
     } catch (error) {
