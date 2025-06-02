@@ -5,6 +5,8 @@ const OrderItem = require('../../models/purchase/OrderItem');
 const StockStorage = require('../../models/distribution/stockStorage');
 const sequelize = require('../../config/database');
 const { Op } = require('sequelize');
+const path = require('path');
+const fs = require('fs').promises;
 
 // GET all GRNs for a Purchase Order
 const getAllGRNs = async (req, res) => {
@@ -60,11 +62,44 @@ const getGRNById = async (req, res) => {
 const createGRN = async (req, res) => {
     try {
         const { poId } = req.params;
-        const { grnDate = new Date(), challanNo, challanDate, document, remark, grnItems } = req.body;
+        const { grnDate = new Date(), challanNo, challanDate, remark } = req.body;
+        let { grnItems } = req.body;
+        const documentFile = req.files?.document;
 
         // Validate required fields
         if (!grnDate || !challanNo || !challanDate) {
             return res.status(400).json({ message: 'grnDate, challanNo, and challanDate are required' });
+        }
+
+        // Parse grnItems if it's a JSON string
+        if (typeof grnItems === 'string') {
+            try {
+                grnItems = JSON.parse(grnItems);
+            } catch (error) {
+                return res.status(400).json({ message: 'Invalid grnItems format: must be a valid JSON array' });
+            }
+        }
+
+        // Validate grnItems is an array
+        if (!Array.isArray(grnItems) || grnItems.length === 0) {
+            return res.status(400).json({ message: 'grnItems must be a non-empty array' });
+        }
+
+        // Validate file type and size if provided
+        let documentPath = null;
+        if (documentFile) {
+            const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+            if (!allowedTypes.includes(documentFile.mimetype)) {
+                return res.status(400).json({ message: 'Only PDF, JPEG, or PNG files are allowed' });
+            }
+            if (documentFile.size > 10 * 1024 * 1024) {
+                return res.status(400).json({ message: 'File size must not exceed 10MB' });
+            }
+
+            const fileExtension = path.extname(documentFile.name);
+            const fileName = `grn-document-${Date.now()}${fileExtension}`;
+            documentPath = `uploads/${fileName}`;
+            await documentFile.mv(path.join(__dirname, '..', '..', documentPath));
         }
 
         // Check if Purchase Order exists
@@ -137,7 +172,7 @@ const createGRN = async (req, res) => {
                 grnDate,
                 challanNo,
                 challanDate,
-                document,
+                document: documentPath,
                 remark
             }, { transaction });
 
@@ -213,6 +248,14 @@ const createGRN = async (req, res) => {
             });
         } catch (error) {
             await transaction.rollback();
+            // Clean up uploaded file if transaction fails
+            if (documentPath) {
+                try {
+                    await fs.unlink(path.join(__dirname, '..', '..', documentPath));
+                } catch (unlinkError) {
+                    console.error('Failed to delete uploaded file:', unlinkError);
+                }
+            }
             throw error;
         }
 
