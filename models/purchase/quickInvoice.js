@@ -24,6 +24,10 @@ const QuickInvoice = sequelize.define('quickInvoice', {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false
     },
+    documents: {
+        type: DataTypes.STRING, // Store document paths or URLs
+        allowNull: true
+    },
     remark: {
         type: DataTypes.STRING,
         allowNull: true

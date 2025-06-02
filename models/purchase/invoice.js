@@ -44,6 +44,10 @@ const Invoice = sequelize.define('Invoice', {
     paymentDate: {
         type: DataTypes.DATE,
         allowNull: true
+    },
+    documents: {
+        type: DataTypes.STRING, // Store document paths or URLs
+        allowNull: true
     }
 }, {
     tableName: 'invoices',
