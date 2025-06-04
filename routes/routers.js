@@ -7,6 +7,7 @@ const instituteController = require('../controller/master/instituteController');
 const unitController = require('../controller/master/unitController');
 const categoryController = require('../controller/master/categoryController');
 const itemController = require('../controller/master/itemController');
+const locationController = require('../controller/master/locationController');
 
 //financial year
 router.post('/createFinancialYear', financialYearController.createFinancialYear);
@@ -25,6 +26,12 @@ router.post('/createInstitute', instituteController.createInstitute);
 router.get('/institutes', instituteController.getInstitutes);
 router.put('/updateInstitute/:id', instituteController.updateInstitute);
 router.delete('/deleteInstitute/:id', instituteController.deleteInstitute);
+
+router.post('/createLocation', locationController.createLocation);
+router.get('/locations', locationController.getAllLocations);
+router.get('/location/:id', locationController.getLocationById);
+router.put('/updateLocation/:id', locationController.updateLocation);
+router.delete('/deleteLocation/:id', locationController.deleteLocation);
 
 //unit
 router.post('/createUnit', unitController.createUnit);
