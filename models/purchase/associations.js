@@ -8,6 +8,7 @@ const Distribution = require('../distribution/Distribution');
 const DistributionItem = require('../../models/distribution/DistributionItem');
 const FinancialYear = require('../../models/master/financialYear');
 const Institute = require('../../models/master/institute');
+const Location = require('../../models/master/location');
 const Invoice = require('../purchase/invoice');
 const InvoiceItem = require('../purchase/invoiceItem');
 const QuickGRN = require('../purchase/quickGRN');
@@ -73,6 +74,8 @@ const defineAssociations = () => {
     DistributionItem.belongsTo(Item, { foreignKey: 'itemId', as: 'item' });
     Distribution.belongsTo(FinancialYear, { foreignKey: 'financialYearId', as: 'financialYear' });
     Distribution.belongsTo(Institute, { foreignKey: 'instituteId', as: 'institute' });
+    Distribution.belongsTo(Location, { foreignKey: 'location',  as: 'locationData' });
+    
 
     // Optional: Inverse relationships for Item
     Item.hasMany(DistributionItem, { foreignKey: 'itemId', as: 'distributionItems' });

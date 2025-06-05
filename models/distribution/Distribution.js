@@ -29,6 +29,14 @@ const Distribution = sequelize.define('Distribution', {
         allowNull: false
     },
     location: {
+        type: DataTypes.INTEGER,
+        allowNull: false
+    },
+    floor: {
+        type: DataTypes.STRING,
+        allowNull: false
+    },
+    rooms: {
         type: DataTypes.STRING,
         allowNull: false
     },

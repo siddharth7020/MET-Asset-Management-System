@@ -5,13 +5,17 @@ const Item = require('../../models/master/item');
 const StockStorage = require('../../models/distribution/stockStorage');
 const FinancialYear = require('../../models/master/financialYear');
 const Institute = require('../../models/master/institute');
+const Location = require('../../models/master/location');
 const sequelize = require('../../config/database');
 
 // GET all Distributions
 const getAllDistributions = async (req, res) => {
     try {
         const distributions = await Distribution.findAll({
-            include: [{ model: DistributionItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] }]
+            include: [
+                { model: DistributionItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] },
+                { model: Location, as: 'locationData', attributes: ['locationID', 'floor', 'room'] }
+            ]
         });
         res.json(distributions);
     } catch (error) {
@@ -28,15 +32,17 @@ const createDistribution = async (req, res) => {
             instituteId,
             employeeName,
             location,
-            distributionDate = new Date(), // Default to current date if not provided
+            floor,
+            rooms,
+            distributionDate = new Date(),
             documents,
             remark,
             items
         } = req.body;
 
         // Validate required fields
-        if (!financialYearId || !instituteId || !employeeName || !location || !distributionDate || !items || !Array.isArray(items) || items.length === 0) {
-            return res.status(400).json({ message: 'financialYearId, instituteId, employeeName, location, distributionDate, and items are required' });
+        if (!financialYearId || !instituteId || !employeeName || !location || !floor || !rooms || typeof rooms !== 'string' || !distributionDate || !items || !Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ message: 'financialYearId, instituteId, employeeName, location, floor, rooms (string), distributionDate, and items are required' });
         }
 
         // Validate distributionDate
@@ -44,14 +50,27 @@ const createDistribution = async (req, res) => {
             return res.status(400).json({ message: 'Invalid distributionDate format' });
         }
 
+        // Validate location (locationID) and rooms
+        const locationRecord = await Location.findByPk(location);
+        if (!locationRecord) {
+            return res.status(404).json({ message: `Location with ID ${location} not found` });
+        }
+        // Validate that rooms is a valid room in the location
+        if (!locationRecord.room.includes(rooms)) {
+            return res.status(400).json({ message: `Room '${rooms}' is not available in the selected location` });
+        }
+        // Validate that floor matches the location
+        if (floor !== locationRecord.floor) {
+            return res.status(400).json({ message: `Floor '${floor}' does not match the location's floor '${locationRecord.floor}'` });
+        }
+
         // Generate distributionNo in format DIS-DDMMYY-01
         const date = new Date(distributionDate);
         const day = String(date.getDate()).padStart(2, '0');
-        const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are 0-based
-        const year = String(date.getFullYear()).slice(-2); // Last two digits of year
-        const dateString = `${day}${month}${year}`; // Format: DDMMYY
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = String(date.getFullYear()).slice(-2);
+        const dateString = `${day}${month}${year}`;
 
-        // Find the last distribution number for the same date to increment the sequence
         const lastDistribution = await Distribution.findOne({
             where: {
                 distributionNo: {
@@ -61,13 +80,11 @@ const createDistribution = async (req, res) => {
             order: [['distributionNo', 'DESC']]
         });
 
-        // Extract the sequence number and increment it
         let sequence = 1;
         if (lastDistribution && lastDistribution.distributionNo) {
             const parts = lastDistribution.distributionNo.split('-');
             if (parts.length === 3 && !isNaN(parts[2])) {
-                const lastSequence = parseInt(parts[2], 10);
-                sequence = lastSequence + 1;
+                sequence = parseInt(parts[2], 10) + 1;
             } else {
                 console.warn(`Invalid distributionNo format found: ${lastDistribution.distributionNo}. Starting sequence at 1.`);
             }
@@ -120,6 +137,8 @@ const createDistribution = async (req, res) => {
                 instituteId,
                 employeeName,
                 location,
+                floor,
+                rooms,
                 distributionDate,
                 distributionNo,
                 documents,
@@ -168,7 +187,10 @@ const createDistribution = async (req, res) => {
         // Fetch created distribution after commit
         try {
             const createdDistribution = await Distribution.findByPk(distribution.id, {
-                include: [{ model: DistributionItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] }]
+                include: [
+                    { model: DistributionItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] },
+                    { model: Location, as: 'locationData', attributes: ['locationID', 'floor', 'room'] }
+                ]
             });
 
             if (!createdDistribution) {
@@ -197,7 +219,7 @@ const createDistribution = async (req, res) => {
 const updateDistribution = async (req, res) => {
     try {
         const { id } = req.params;
-        const { financialYearId, instituteId, employeeName, location, distributionDate, distributionNo, documents, remark, items } = req.body;
+        const { financialYearId, instituteId, employeeName, location, floor, rooms, distributionDate, distributionNo, documents, remark, items } = req.body;
 
         // Check if distribution exists
         const distribution = await Distribution.findByPk(id, {
@@ -218,6 +240,22 @@ const updateDistribution = async (req, res) => {
             const institute = await Institute.findByPk(instituteId);
             if (!institute) {
                 return res.status(404).json({ message: `Institute with ID ${instituteId} not found` });
+            }
+        }
+        if (location) {
+            const locationRecord = await Location.findByPk(location);
+            if (!locationRecord) {
+                return res.status(404).json({ message: `Location with ID ${location} not found` });
+            }
+            // Validate rooms if provided
+            if (rooms && typeof rooms === 'string') {
+                if (!locationRecord.room.includes(rooms)) {
+                    return res.status(400).json({ message: `Room '${rooms}' is not available in the selected location` });
+                }
+            }
+            // Validate floor if provided
+            if (floor && floor !== locationRecord.floor) {
+                return res.status(400).json({ message: `Floor '${floor}' does not match the location's floor '${locationRecord.floor}'` });
             }
         }
 
@@ -260,6 +298,8 @@ const updateDistribution = async (req, res) => {
                 instituteId: instituteId || distribution.instituteId,
                 employeeName: employeeName || distribution.employeeName,
                 location: location || distribution.location,
+                floor: floor || distribution.floor,
+                rooms: rooms || distribution.rooms,
                 distributionDate: distributionDate || distribution.distributionDate,
                 distributionNo: distributionNo || distribution.distributionNo,
                 documents: documents !== undefined ? documents : distribution.documents,
@@ -371,7 +411,10 @@ const updateDistribution = async (req, res) => {
         // Fetch updated distribution
         try {
             const updatedDistribution = await Distribution.findByPk(id, {
-                include: [{ model: DistributionItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] }]
+                include: [
+                    { model: DistributionItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] },
+                    { model: Location, as: 'locationData', attributes: ['locationID', 'floor', 'room'] }
+                ]
             });
 
             if (!updatedDistribution) {
@@ -401,7 +444,10 @@ const getDistributionById = async (req, res) => {
     try {
         const { id } = req.params;
         const distribution = await Distribution.findByPk(id, {
-            include: [{ model: DistributionItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] }]
+            include: [
+                { model: DistributionItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] },
+                { model: Location, as: 'locationData', attributes: ['locationID', 'floor', 'room'] }
+            ]
         });
 
         if (!distribution) {
