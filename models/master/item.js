@@ -20,14 +20,6 @@ const Item = sequelize.define('item', {
             key: 'categoryID'
         }
     },
-    unit: {
-        type: Sequelize.INTEGER,
-        allowNull: false,
-        references: {
-            model: 'unit', // Use table name as string
-            key: 'unitId'
-        }
-    },
     remark: {
         type: Sequelize.STRING,
         allowNull: true

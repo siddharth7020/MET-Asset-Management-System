@@ -2,6 +2,7 @@ const PurchaseOrder = require('./PurchaseOrder');
 const OrderItem = require('./OrderItem');
 const GRN = require('./GRN');
 const GRNItem = require('./GRNItem');
+const Unit = require('../master/Unit');
 const Item = require('../master/item');
 const StockStorage = require('../distribution/stockStorage');
 const Distribution = require('../distribution/Distribution');
@@ -30,6 +31,10 @@ const defineAssociations = () => {
     // OrderItem -> Item
     OrderItem.belongsTo(Item, { foreignKey: 'itemId', as: 'item' });
     Item.hasMany(OrderItem, { foreignKey: 'itemId', as: 'orderItems' });
+
+    //orderItem -> Unit
+    OrderItem.belongsTo(Unit, { foreignKey: 'unitId', as: 'unit' });
+    Unit.hasMany(OrderItem, { foreignKey: 'unitId', as: 'orderItems' });
 
     // OrderItem -> GRNItem
     OrderItem.hasMany(GRNItem, { foreignKey: 'orderItemId', as: 'grnItems' });

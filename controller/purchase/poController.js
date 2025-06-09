@@ -96,6 +96,7 @@ const createPurchaseOrder = async (req, res) => {
             const orderItemData = orderItems.map(item => ({
                 poId: purchaseOrder.poId,
                 itemId: item.itemId,
+                unitId: item.unitId,
                 quantity: item.quantity,
                 rate: item.rate,
                 amount: item.quantity * item.rate,
@@ -217,6 +218,7 @@ const updatePurchaseOrder = async (req, res) => {
                 const orderItemData = {
                     poId: purchaseOrder.poId,
                     itemId: item.itemId,
+                    unitId: item.unitId,
                     quantity: item.quantity,
                     rate: item.rate,
                     amount: item.quantity * item.rate,
