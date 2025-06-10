@@ -31,7 +31,6 @@ const Item = sequelize.define('item', {
 // Associations will be defined in models/index.js
 Item.associate = function (models) {
     Item.belongsTo(models.ItemCategory, { foreignKey: 'itemCategory' });
-    Item.belongsTo(models.Unit, { foreignKey: 'unit' });
 };
 
 module.exports = Item;
