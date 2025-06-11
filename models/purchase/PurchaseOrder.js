@@ -29,8 +29,15 @@ const PurchaseOrder = sequelize.define('PurchaseOrder', {
         allowNull: false
     },
     document: {
-        type: DataTypes.STRING, // Changed to STRING to store file path
-        allowNull: true
+        type: DataTypes.STRING(1000), // Stores JSON array of file paths
+        allowNull: true,
+        get() {
+            const value = this.getDataValue('document');
+            return value ? JSON.parse(value) : [];
+        },
+        set(value) {
+            this.setDataValue('document', value ? JSON.stringify(value) : null);
+        }
     },
     requestedBy: {
         type: DataTypes.STRING,

@@ -27,7 +27,6 @@ router.get('/:poId', purchaseOrderController.getPurchaseOrderById);
 router.get('/stock/:itemId', StockStorageController.getStockStorageByItemId);
 router.get('/grn/:id', GRNController.getGRNById);
 router.get('/invoices/:id', invoiceController.getInvoice);
-router.get('/:poId/invoices', invoiceController.getPODetailsForInvoice);
 router.get('/quick-grns/:id', QuickGRNController.getQuickGRNById);
 router.get('/quick-invoices/:id', QuickInvoiceController.getQuickInvoiceById);
 router.get('/distributions/:id', DistributionController.getDistributionById);

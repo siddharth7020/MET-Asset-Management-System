@@ -62,9 +62,7 @@ const getGRNById = async (req, res) => {
 const createGRN = async (req, res) => {
     try {
         const { poId } = req.params;
-        const { grnDate = new Date(), challanNo, challanDate, remark } = req.body;
-        let { grnItems } = req.body;
-        const documentFile = req.files?.document;
+        const { grnDate = new Date(), challanNo, challanDate, remark, grnItems: grnItemsRaw } = req.body;
 
         // Validate required fields
         if (!grnDate || !challanNo || !challanDate) {
@@ -72,12 +70,15 @@ const createGRN = async (req, res) => {
         }
 
         // Parse grnItems if it's a JSON string
-        if (typeof grnItems === 'string') {
+        let grnItems;
+        if (typeof grnItemsRaw === 'string') {
             try {
-                grnItems = JSON.parse(grnItems);
+                grnItems = JSON.parse(grnItemsRaw);
             } catch (error) {
                 return res.status(400).json({ message: 'Invalid grnItems format: must be a valid JSON array' });
             }
+        } else {
+            grnItems = grnItemsRaw;
         }
 
         // Validate grnItems is an array
@@ -85,21 +86,28 @@ const createGRN = async (req, res) => {
             return res.status(400).json({ message: 'grnItems must be a non-empty array' });
         }
 
-        // Validate file type and size if provided
-        let documentPath = null;
-        if (documentFile) {
+        // Handle multiple file uploads
+        let documentPaths = [];
+        if (req.files && req.files.documents) {
+            const documents = Array.isArray(req.files.documents) ? req.files.documents : [req.files.documents];
             const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
-            if (!allowedTypes.includes(documentFile.mimetype)) {
-                return res.status(400).json({ message: 'Only PDF, JPEG, or PNG files are allowed' });
-            }
-            if (documentFile.size > 10 * 1024 * 1024) {
-                return res.status(400).json({ message: 'File size must not exceed 10MB' });
-            }
+            const maxFileSize = 10 * 1024 * 1024; // 10MB
 
-            const fileExtension = path.extname(documentFile.name);
-            const fileName = `grn-document-${Date.now()}${fileExtension}`;
-            documentPath = `uploads/${fileName}`;
-            await documentFile.mv(path.join(__dirname, '..', '..', documentPath));
+            for (const document of documents) {
+                if (!allowedTypes.includes(document.mimetype)) {
+                    return res.status(400).json({ message: `Invalid file type for ${document.name}. Only PDF, JPEG, or PNG are allowed.` });
+                }
+                if (document.size > maxFileSize) {
+                    return res.status(400).json({ message: `File ${document.name} exceeds 10MB limit.` });
+                }
+                const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+                const fileExtension = path.extname(document.name);
+                const fileName = `grn-document-${uniqueSuffix}${fileExtension}`;
+                const filePath = path.join('Uploads', fileName);
+                await fs.mkdir(path.join(__dirname, '../../Uploads'), { recursive: true });
+                await document.mv(path.join(__dirname, '../../', filePath));
+                documentPaths.push(filePath);
+            }
         }
 
         // Check if Purchase Order exists
@@ -113,13 +121,9 @@ const createGRN = async (req, res) => {
         const day = String(date.getDate()).padStart(2, '0');
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const year = String(date.getFullYear()).slice(-2);
-
+        const dateString = `${day}${month}${year}`;
         const lastGRN = await GRN.findOne({
-            where: {
-                grnNo: {
-                    [Op.like]: `GRN-${day}${month}${year}-%`
-                }
-            },
+            where: { grnNo: { [Op.like]: `GRN-${dateString}-%` } },
             order: [['grnNo', 'DESC']]
         });
 
@@ -128,7 +132,7 @@ const createGRN = async (req, res) => {
             const lastSequence = parseInt(lastGRN.grnNo.split('-')[2], 10);
             sequence = lastSequence + 1;
         }
-        const grnNo = `GRN-${day}${month}${year}-${String(sequence).padStart(2, '0')}`;
+        const grnNo = `GRN-${dateString}-${String(sequence).padStart(2, '0')}`;
 
         // Validate OrderItem IDs and fetch itemId
         const orderItemIds = grnItems.map(item => item.orderItemId);
@@ -172,7 +176,7 @@ const createGRN = async (req, res) => {
                 grnDate,
                 challanNo,
                 challanDate,
-                document: documentPath,
+                document: documentPaths.length > 0 ? documentPaths : null,
                 remark
             }, { transaction });
 
@@ -248,12 +252,14 @@ const createGRN = async (req, res) => {
             });
         } catch (error) {
             await transaction.rollback();
-            // Clean up uploaded file if transaction fails
-            if (documentPath) {
-                try {
-                    await fs.unlink(path.join(__dirname, '..', '..', documentPath));
-                } catch (unlinkError) {
-                    console.error('Failed to delete uploaded file:', unlinkError);
+            // Clean up uploaded files if transaction fails
+            if (documentPaths.length > 0) {
+                for (const docPath of documentPaths) {
+                    try {
+                        await fs.unlink(path.join(__dirname, '../../', docPath));
+                    } catch (unlinkError) {
+                        console.error(`Failed to delete uploaded file: ${docPath}`, unlinkError);
+                    }
                 }
             }
             throw error;
@@ -275,16 +281,63 @@ const updateGRN = async (req, res) => {
             grnDate,
             challanNo,
             challanDate,
-            document,
             remark,
-            grnItems
+            grnItems: grnItemsRaw,
+            existingDocuments // Array of existing document paths to retain
         } = req.body;
+
+        // Parse grnItems if it's a JSON string
+        let grnItems;
+        if (typeof grnItemsRaw === 'string') {
+            try {
+                grnItems = JSON.parse(grnItemsRaw);
+            } catch (error) {
+                return res.status(400).json({ message: 'Invalid grnItems format: must be a valid JSON array' });
+            }
+        } else {
+            grnItems = grnItemsRaw;
+        }
 
         const grn = await GRN.findByPk(grnId, {
             include: [{ model: GRNItem, as: 'grnItems' }],
         });
         if (!grn) {
             return res.status(404).json({ message: 'GRN not found' });
+        }
+
+        // Handle multiple file uploads
+        let documentPaths = existingDocuments ? (Array.isArray(existingDocuments) ? existingDocuments : JSON.parse(existingDocuments)) : [];
+        if (req.files && req.files.documents) {
+            const documents = Array.isArray(req.files.documents) ? req.files.documents : [req.files.documents];
+            const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+            const maxFileSize = 10 * 1024 * 1024; // 10MB
+
+            for (const document of documents) {
+                if (!allowedTypes.includes(document.mimetype)) {
+                    return res.status(400).json({ message: `Invalid file type for ${document.name}. Only PDF, JPEG, or PNG are allowed.` });
+                }
+                if (document.size > maxFileSize) {
+                    return res.status(400).json({ message: `File ${document.name} exceeds 10MB limit.` });
+                }
+                const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+                const fileExtension = path.extname(document.name);
+                const fileName = `grn-document-${uniqueSuffix}${fileExtension}`;
+                const filePath = path.join('Uploads', fileName);
+                await fs.mkdir(path.join(__dirname, '../../Uploads'), { recursive: true });
+                await document.mv(path.join(__dirname, '../../', filePath));
+                documentPaths.push(filePath);
+            }
+        }
+
+        // Delete old files that are no longer referenced
+        const oldDocuments = grn.document || [];
+        const documentsToDelete = oldDocuments.filter(doc => !documentPaths.includes(doc));
+        for (const doc of documentsToDelete) {
+            try {
+                await fs.unlink(path.join(__dirname, '../../', doc));
+            } catch (err) {
+                console.warn(`Failed to delete old file: ${doc}`, err);
+            }
         }
 
         const transaction = await sequelize.transaction();
@@ -295,7 +348,7 @@ const updateGRN = async (req, res) => {
                     grnDate: grnDate ?? grn.grnDate,
                     challanNo: challanNo ?? grn.challanNo,
                     challanDate: challanDate ?? grn.challanDate,
-                    document: document !== undefined ? document : grn.document,
+                    document: documentPaths.length > 0 ? documentPaths : null,
                     remark: remark !== undefined ? remark : grn.remark,
                 },
                 { transaction }
@@ -361,7 +414,7 @@ const updateGRN = async (req, res) => {
                         });
                     }
 
-                    const rejectedQuantity = remainingQuantity - item.receivedQuantity;
+                    const rejectedQuantity = item.rejectedQuantity || (remainingQuantity - item.receivedQuantity);
 
                     const grnItemData = {
                         grnId: grn.id,
@@ -477,6 +530,15 @@ const updateGRN = async (req, res) => {
             res.status(200).json(updatedGRN);
         } catch (error) {
             await transaction.rollback();
+            // Clean up new files if transaction fails
+            const newFiles = documentPaths.filter(doc => !oldDocuments.includes(doc));
+            for (const doc of newFiles) {
+                try {
+                    await fs.unlink(path.join(__dirname, '../../', doc));
+                } catch (unlinkError) {
+                    console.error(`Failed to delete new file: ${doc}`, unlinkError);
+                }
+            }
             throw error;
         }
     } catch (error) {
@@ -518,6 +580,17 @@ const deleteGRN = async (req, res) => {
                         } else {
                             await stock.save({ transaction });
                         }
+                    }
+                }
+            }
+
+            // Delete associated files
+            if (grn.document && Array.isArray(grn.document)) {
+                for (const doc of grn.document) {
+                    try {
+                        await fs.unlink(path.join(__dirname, '../../', doc));
+                    } catch (err) {
+                        console.warn(`Failed to delete file: ${doc}`, err);
                     }
                 }
             }

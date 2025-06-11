@@ -29,8 +29,15 @@ const GRN = sequelize.define('GRN', {
         allowNull: false
     },
     document: {
-        type: DataTypes.STRING, // Use JSON for multiple documents or ARRAY for PostgreSQL
-        allowNull: true
+        type: DataTypes.STRING(1000), // Stores JSON array of file paths
+        allowNull: true,
+        get() {
+            const value = this.getDataValue('document');
+            return value ? JSON.parse(value) : [];
+        },
+        set(value) {
+            this.setDataValue('document', value ? JSON.stringify(value) : null);
+        }
     },
     remark: {
         type: DataTypes.STRING,

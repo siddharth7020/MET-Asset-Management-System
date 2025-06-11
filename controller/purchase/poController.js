@@ -15,7 +15,7 @@ const createPurchaseOrder = async (req, res) => {
             vendorId,
             requestedBy,
             remark,
-            orderItems: orderItemsRaw // Renamed to avoid confusion
+            orderItems: orderItemsRaw
         } = req.body;
 
         // Parse orderItems if it's a JSON string
@@ -41,20 +41,28 @@ const createPurchaseOrder = async (req, res) => {
             }
         }
 
-        // Handle file upload
-        let documentPath = null;
-        if (req.files && req.files.document) {
-            const document = req.files.document;
+        // Handle multiple file uploads
+        let documentPaths = [];
+        if (req.files && req.files.documents) {
+            const documents = Array.isArray(req.files.documents) ? req.files.documents : [req.files.documents];
             const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
-            if (!allowedTypes.includes(document.mimetype)) {
-                return res.status(400).json({ message: 'Invalid file type. Only PDF, JPEG, and PNG are allowed.' });
+            const maxFileSize = 10 * 1024 * 1024; // 10MB
+
+            for (const document of documents) {
+                if (!allowedTypes.includes(document.mimetype)) {
+                    return res.status(400).json({ message: `Invalid file type for ${document.name}. Only PDF, JPEG, and PNG are allowed.` });
+                }
+                if (document.size > maxFileSize) {
+                    return res.status(400).json({ message: `File ${document.name} exceeds 10MB limit.` });
+                }
+                const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+                const fileExtension = path.extname(document.name);
+                const fileName = `document-${uniqueSuffix}${fileExtension}`;
+                const filePath = path.join('uploads', fileName);
+                await fs.mkdir(path.join(__dirname, '../../Uploads'), { recursive: true });
+                await document.mv(path.join(__dirname, '../../', filePath));
+                documentPaths.push(filePath);
             }
-            const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-            const fileExtension = path.extname(document.name);
-            const fileName = `document-${uniqueSuffix}${fileExtension}`;
-            documentPath = path.join('uploads', fileName);
-            await fs.mkdir(path.join(__dirname, '../../uploads'), { recursive: true });
-            await document.mv(path.join(__dirname, '../../', documentPath));
         }
 
         // Generate poNo in format PO-DDMMYY-01
@@ -86,7 +94,7 @@ const createPurchaseOrder = async (req, res) => {
             instituteId,
             financialYearId,
             vendorId,
-            document: documentPath,
+            document: documentPaths.length > 0 ? documentPaths : null,
             requestedBy,
             remark
         });
@@ -131,7 +139,8 @@ const updatePurchaseOrder = async (req, res) => {
             vendorId,
             requestedBy,
             remark,
-            orderItems: orderItemsRaw
+            orderItems: orderItemsRaw,
+            existingDocuments // Array of existing document paths to retain
         } = req.body;
 
         // Parse orderItems if it's a JSON string
@@ -149,7 +158,6 @@ const updatePurchaseOrder = async (req, res) => {
             return res.status(400).json({ message: 'orderItems must be an array' });
         }
 
-        let documentPath = null;
         const purchaseOrder = await PurchaseOrder.findByPk(poId, {
             include: [{ model: OrderItem, as: 'orderItems' }],
             transaction: t,
@@ -159,29 +167,41 @@ const updatePurchaseOrder = async (req, res) => {
             return res.status(404).json({ message: 'Purchase Order not found' });
         }
 
-        // Handle file upload
-        if (req.files && req.files.document) {
-            const document = req.files.document;
+        // Handle multiple file uploads
+        let documentPaths = existingDocuments ? (Array.isArray(existingDocuments) ? existingDocuments : JSON.parse(existingDocuments)) : [];
+        if (req.files && req.files.documents) {
+            const documents = Array.isArray(req.files.documents) ? req.files.documents : [req.files.documents];
             const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
-            if (!allowedTypes.includes(document.mimetype)) {
-                await t.rollback();
-                return res.status(400).json({ message: 'Invalid file type. Only PDF, JPEG, and PNG are allowed.' });
-            }
-            const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-            const fileExtension = path.extname(document.name);
-            const fileName = `document-${uniqueSuffix}${fileExtension}`;
-            documentPath = path.join('uploads', fileName);
-            await fs.mkdir(path.join(__dirname, '../../Uploads'), { recursive: true });
-            await document.mv(path.join(__dirname, '../../', documentPath));
-            if (purchaseOrder.document) {
-                try {
-                    await fs.unlink(path.join(__dirname, '../../', purchaseOrder.document));
-                } catch (err) {
-                    console.warn(`Failed to delete old file: ${purchaseOrder.document}`, err);
+            const maxFileSize = 10 * 1024 * 1024; // 10MB
+
+            for (const document of documents) {
+                if (!allowedTypes.includes(document.mimetype)) {
+                    await t.rollback();
+                    return res.status(400).json({ message: `Invalid file type for ${document.name}. Only PDF, JPEG, and PNG are allowed.` });
                 }
+                if (document.size > maxFileSize) {
+                    await t.rollback();
+                    return res.status(400).json({ message: `File ${document.name} exceeds 10MB limit.` });
+                }
+                const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+                const fileExtension = path.extname(document.name);
+                const fileName = `document-${uniqueSuffix}${fileExtension}`;
+                const filePath = path.join('Uploads', fileName);
+                await fs.mkdir(path.join(__dirname, '../../Uploads'), { recursive: true });
+                await document.mv(path.join(__dirname, '../../', filePath));
+                documentPaths.push(filePath);
             }
-        } else {
-            documentPath = purchaseOrder.document;
+        }
+
+        // Delete old files that are no longer referenced
+        const oldDocuments = purchaseOrder.document || [];
+        const documentsToDelete = oldDocuments.filter(doc => !documentPaths.includes(doc));
+        for (const doc of documentsToDelete) {
+            try {
+                await fs.unlink(path.join(__dirname, '../../', doc));
+            } catch (err) {
+                console.warn(`Failed to delete old file: ${doc}`, err);
+            }
         }
 
         await purchaseOrder.update(
@@ -191,7 +211,7 @@ const updatePurchaseOrder = async (req, res) => {
                 instituteId,
                 financialYearId,
                 vendorId,
-                document: documentPath,
+                document: documentPaths.length > 0 ? documentPaths : null,
                 requestedBy,
                 remark,
             },
@@ -299,11 +319,13 @@ const deletePurchaseOrder = async (req, res) => {
             return res.status(404).json({ message: 'Purchase Order not found' });
         }
 
-        if (purchaseOrder.document) {
-            try {
-                await fs.unlink(path.join(__dirname, '../../', purchaseOrder.document));
-            } catch (err) {
-                console.warn(`Failed to delete file: ${purchaseOrder.document}`, err);
+        if (purchaseOrder.document && Array.isArray(purchaseOrder.document)) {
+            for (const doc of purchaseOrder.document) {
+                try {
+                    await fs.unlink(path.join(__dirname, '../../', doc));
+                } catch (err) {
+                    console.warn(`Failed to delete file: ${doc}`, err);
+                }
             }
         }
 
