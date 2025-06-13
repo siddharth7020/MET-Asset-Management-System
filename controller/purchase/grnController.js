@@ -134,7 +134,7 @@ const createGRN = async (req, res) => {
         }
         const grnNo = `GRN-${dateString}-${String(sequence).padStart(2, '0')}`;
 
-        // Validate OrderItem IDs and fetch itemId
+        // Validate OrderItem IDs and fetch itemId and unitId
         const orderItemIds = grnItems.map(item => item.orderItemId);
         const orderItems = await OrderItem.findAll({
             where: { id: orderItemIds, poId },
@@ -152,7 +152,12 @@ const createGRN = async (req, res) => {
                 where: { orderItemId: orderItem.id }
             });
             const remainingQuantity = orderItem.quantity - (previousReceived || 0);
-            return { orderItemId: orderItem.id, remainingQuantity, itemId: orderItem.itemId };
+            return { 
+                orderItemId: orderItem.id, 
+                remainingQuantity, 
+                itemId: orderItem.itemId, 
+                unitId: orderItem.unitId // Fetch unitId from OrderItem
+            };
         }));
 
         const validGrnItems = grnItems.filter(item => {
@@ -165,6 +170,21 @@ const createGRN = async (req, res) => {
                 message: 'No valid items to receive. All items are either fully received or have invalid received quantities.'
             });
         }
+
+        // Generate storeCode for each GRNItem in format item-DDMMYY-N
+        const storeCodePromises = validGrnItems.map(async (item) => {
+            const lastStoreCode = await GRNItem.findOne({
+                where: { storeCode: { [Op.like]: `item-${dateString}-%` } },
+                order: [['storeCode', 'DESC']]
+            });
+            let storeSequence = 1;
+            if (lastStoreCode) {
+                const lastStoreSequence = parseInt(lastStoreCode.storeCode.split('-')[2], 10);
+                storeSequence = lastStoreSequence + 1;
+            }
+            return `item-${dateString}-${storeSequence}`;
+        });
+        const storeCodes = await Promise.all(storeCodePromises);
 
         const transaction = await sequelize.transaction();
         let createdGRN;
@@ -180,8 +200,8 @@ const createGRN = async (req, res) => {
                 remark
             }, { transaction });
 
-            // Create GRN Items with itemId
-            const grnItemData = await Promise.all(validGrnItems.map(async (item) => {
+            // Create GRN Items with itemId, unitId, and storeCode
+            const grnItemData = await Promise.all(validGrnItems.map(async (item, index) => {
                 const orderItem = orderItems.find(oi => oi.id === item.orderItemId);
                 const previousReceived = await GRNItem.sum('receivedQuantity', {
                     where: { orderItemId: item.orderItemId },
@@ -190,7 +210,7 @@ const createGRN = async (req, res) => {
                 const remainingQuantity = orderItem.quantity - (previousReceived || 0);
 
                 const receivedQuantity = Math.min(item.receivedQuantity, remainingQuantity);
-                const rejectedQuantity = remainingQuantity - receivedQuantity;
+                const rejectedQuantity = item.rejectedQuantity || (remainingQuantity - receivedQuantity);
 
                 // Validate receivedQuantity
                 if (receivedQuantity < 0) {
@@ -201,6 +221,8 @@ const createGRN = async (req, res) => {
                     grnId: grn.id,
                     orderItemId: item.orderItemId,
                     itemId: orderItem.itemId,
+                    unitId: orderItem.unitId, // Use unitId from OrderItem
+                    storeCode: storeCodes[index], // Assign generated storeCode
                     receivedQuantity,
                     rejectedQuantity
                 };
@@ -229,6 +251,8 @@ const createGRN = async (req, res) => {
                         poId,
                         grnId: grn.id,
                         qGRNId: null,
+                        storeCode: item.storeCode,
+                        unitId: item.unitId,
                         itemId: item.itemId,
                         quantity: item.receivedQuantity,
                         remark: remark || null
@@ -283,7 +307,7 @@ const updateGRN = async (req, res) => {
             challanDate,
             remark,
             grnItems: grnItemsRaw,
-            existingDocuments // Array of existing document paths to retain
+            existingDocuments
         } = req.body;
 
         // Parse grnItems if it's a JSON string
@@ -340,6 +364,13 @@ const updateGRN = async (req, res) => {
             }
         }
 
+        // Generate storeCode for new GRNItems in format item-DDMMYY-N
+        const date = new Date(grnDate || grn.grnDate);
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = String(date.getFullYear()).slice(-2);
+        const dateString = `${day}${month}${year}`;
+
         const transaction = await sequelize.transaction();
         try {
             await grn.update(
@@ -390,6 +421,24 @@ const updateGRN = async (req, res) => {
                     });
                 }
 
+                // Generate storeCodes for new items
+                const newGrnItems = grnItems.filter(item => !item.id);
+                const storeCodePromises = newGrnItems.map(async () => {
+                    const lastStoreCode = await GRNItem.findOne({
+                        where: { storeCode: { [Op.like]: `item-${dateString}-%` } },
+                        order: [['storeCode', 'DESC']],
+                        transaction
+                    });
+                    let storeSequence = 1;
+                    if (lastStoreCode) {
+                        const lastStoreSequence = parseInt(lastStoreCode.storeCode.split('-')[2], 10);
+                        storeSequence = lastStoreSequence + 1;
+                    }
+                    return `item-${dateString}-${storeSequence}`;
+                });
+                const storeCodes = await Promise.all(storeCodePromises);
+                let storeCodeIndex = 0;
+
                 for (const item of grnItems) {
                     const orderItem = await OrderItem.findByPk(item.orderItemId, {
                         transaction,
@@ -420,6 +469,8 @@ const updateGRN = async (req, res) => {
                         grnId: grn.id,
                         orderItemId: item.orderItemId,
                         itemId: orderItem.itemId,
+                        unitId: orderItem.unitId, // Use unitId from OrderItem
+                        storeCode: item.id ? (grn.grnItems.find(gi => gi.id === item.id)?.storeCode || storeCodes[storeCodeIndex++]) : storeCodes[storeCodeIndex++],
                         receivedQuantity: item.receivedQuantity,
                         rejectedQuantity,
                     };
@@ -483,6 +534,8 @@ const updateGRN = async (req, res) => {
                                     poId: grn.poId,
                                     grnId: grn.id,
                                     qGRNId: null,
+                                    storeCode: newGRNItem.storeCode,
+                                    unitId: orderItem.unitId,
                                     itemId: orderItem.itemId,
                                     quantity: item.receivedQuantity,
                                     remark: remark || null,

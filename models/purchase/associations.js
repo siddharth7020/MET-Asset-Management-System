@@ -2,7 +2,7 @@ const PurchaseOrder = require('./PurchaseOrder');
 const OrderItem = require('./OrderItem');
 const GRN = require('./GRN');
 const GRNItem = require('./GRNItem');
-const Unit = require('../master/Unit');
+const Unit = require('../master/unit');
 const Item = require('../master/item');
 const StockStorage = require('../distribution/stockStorage');
 const Distribution = require('../distribution/Distribution');
@@ -54,6 +54,7 @@ const defineAssociations = () => {
     // StockStorage -> Item
     StockStorage.belongsTo(Item, { foreignKey: 'itemId', as: 'item' });
     Item.hasMany(StockStorage, { foreignKey: 'itemId', as: 'stockStorages' });
+    StockStorage.belongsTo(Unit, { as: 'unit', foreignKey: 'unitId' });
 
     // Invoice Associations
     PurchaseOrder.hasMany(Invoice, { foreignKey: 'poId', as: 'invoices' });
@@ -79,8 +80,8 @@ const defineAssociations = () => {
     DistributionItem.belongsTo(Item, { foreignKey: 'itemId', as: 'item' });
     Distribution.belongsTo(FinancialYear, { foreignKey: 'financialYearId', as: 'financialYear' });
     Distribution.belongsTo(Institute, { foreignKey: 'instituteId', as: 'institute' });
-    Distribution.belongsTo(Location, { foreignKey: 'location',  as: 'locationData' });
-    
+    Distribution.belongsTo(Location, { foreignKey: 'location', as: 'locationData' });
+
 
     // Optional: Inverse relationships for Item
     Item.hasMany(DistributionItem, { foreignKey: 'itemId', as: 'distributionItems' });

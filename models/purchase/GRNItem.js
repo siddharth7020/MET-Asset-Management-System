@@ -19,6 +19,14 @@ const GRNItem = sequelize.define('GRNItem', {
         type: DataTypes.INTEGER,
         allowNull: false
     },
+    unitId: {
+        type: DataTypes.INTEGER,
+        allowNull: false
+    },
+    storeCode: {
+        type: DataTypes.STRING,
+        allowNull: false
+    },
     receivedQuantity: {
         type: DataTypes.INTEGER,
         allowNull: false,

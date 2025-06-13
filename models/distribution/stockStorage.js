@@ -23,6 +23,14 @@ const StockStorage = sequelize.define('StockStorage', {
         type: DataTypes.INTEGER,
         allowNull: false
     },
+    storeCode: {
+        type: DataTypes.STRING,
+        allowNull: false
+    },
+    unitId: {
+        type: DataTypes.INTEGER,
+        allowNull: false
+    },
     quantity: {
         type: DataTypes.INTEGER,
         allowNull: false,

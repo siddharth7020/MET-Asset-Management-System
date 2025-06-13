@@ -2,23 +2,44 @@ const GRN = require('../../models/purchase/GRN');
 const GRNItem = require('../../models/purchase/GRNItem');
 const PurchaseOrder = require('../../models/purchase/PurchaseOrder');
 const Item = require('../../models/master/item');
+const Unit = require('../../models/master/unit');
 const StockStorage = require('../../models/distribution/stockStorage');
 const sequelize = require('../../config/database');
+const { Op } = require('sequelize');
 
-
+// GET all StockStorage entries
 const getAllStockStorage = async (req, res) => {
     try {
         const stock = await StockStorage.findAll();
-        console.log('All StockStorage:', stock);
-        
-        res.status(200).json(stock);
+
+        // Format response to include all relevant fields
+        const formattedStock = stock.map(entry => ({
+            id: entry.id,
+            poId: entry.poId,
+            poNo: entry.grn?.purchaseOrder?.poNo || null,
+            grnId: entry.grnId,
+            grnNo: entry.grn?.grnNo || null,
+            grnDate: entry.grn?.grnDate || null,
+            qGRNId: entry.qGRNId,
+            itemId: entry.itemId,
+            itemName: entry.item?.itemName || null,
+            storeCode: entry.storeCode,
+            unitId: entry.unitId,
+            unitName: entry.unit?.name || null,
+            quantity: entry.quantity,
+            remark: entry.remark,
+            createdAt: entry.createdAt,
+            updatedAt: entry.updatedAt
+        }));
+
+        res.status(200).json(formattedStock);
     } catch (error) {
         console.error('Error fetching StockStorage:', error);
         res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
 
-// GET StockStorage details for a specific itemId (how many GRNs it appears in)
+// GET StockStorage details for a specific itemId
 const getStockStorageByItemId = async (req, res) => {
     try {
         const { itemId } = req.params;
@@ -34,23 +55,28 @@ const getStockStorageByItemId = async (req, res) => {
             where: { itemId },
             attributes: [
                 'grnId',
-                'grn.id', // Include grn.id
-                'purchaseOrder.poId', // Include purchaseOrder.poId
-                [sequelize.fn('SUM', sequelize.col('quantity')), 'totalQuantity'], // Sum quantities per grnId
+                'storeCode',
+                'unitId',
+                [sequelize.fn('SUM', sequelize.col('quantity')), 'totalQuantity'],
             ],
-            group: ['grnId', 'grn.id', 'purchaseOrder.poId'], // Group by grnId, grn.id, and purchaseOrder.poId
+            group: ['grnId', 'storeCode', 'unitId', 'grn.id', 'purchaseOrder.poId', 'unit.id'],
             include: [
-                { model: GRN, as: 'grn', attributes: ['grnNo', 'grnDate'] },
-                { model: PurchaseOrder, as: 'purchaseOrder', attributes: ['poId', 'poNo'] }
+                { 
+                    model: GRN, 
+                    as: 'grn', 
+                    attributes: ['id', 'grnNo', 'grnDate'],
+                    include: [{ model: PurchaseOrder, as: 'purchaseOrder', attributes: ['poId', 'poNo'] }]
+                },
+                { model: Unit, as: 'unit', attributes: ['id', 'name'] }
             ],
-            order: [['grnId', 'ASC']] // Optional: sort by grnId
+            order: [['grnId', 'ASC']]
         });
 
         if (stockEntries.length === 0) {
             return res.status(404).json({ message: `No stock entries found for itemId ${itemId}` });
         }
 
-        // Calculate totalItemCount (sum of totalQuantity across all GRNs)
+        // Calculate totalItemCount
         const totalItemCount = stockEntries.reduce((sum, entry) => {
             return sum + parseInt(entry.getDataValue('totalQuantity'));
         }, 0);
@@ -58,16 +84,19 @@ const getStockStorageByItemId = async (req, res) => {
         // Format response
         const response = {
             itemId,
-            itemName: item.itemName, // Changed from item.itemName to item.name (assuming standard naming)
-            grnCount: stockEntries.length, // Number of unique GRNs
-            totalItemCount, // Total quantity across all GRNs
+            itemName: item.itemName,
+            grnCount: stockEntries.length,
+            totalItemCount,
             grnDetails: stockEntries.map(entry => ({
                 grnId: entry.grnId,
-                grnNo: entry.grn?.grnNo,
-                grnDate: entry.grn?.grnDate,
-                poId: entry.purchaseOrder?.poId,
-                poNo: entry.purchaseOrder?.poNo,
-                totalQuantity: parseInt(entry.getDataValue('totalQuantity')) // Quantity per GRN
+                grnNo: entry.grn?.grnNo || null,
+                grnDate: entry.grn?.grnDate || null,
+                poId: entry.grn?.purchaseOrder?.poId || null,
+                poNo: entry.grn?.purchaseOrder?.poNo || null,
+                storeCode: entry.storeCode,
+                unitId: entry.unitId,
+                unitName: entry.unit?.name || null,
+                totalQuantity: parseInt(entry.getDataValue('totalQuantity'))
             }))
         };
 
@@ -78,9 +107,7 @@ const getStockStorageByItemId = async (req, res) => {
     }
 };
 
-// get all stock storage
-
 module.exports = {
-    getStockStorageByItemId,
-    getAllStockStorage
+    getAllStockStorage,
+    getStockStorageByItemId
 };
