@@ -65,27 +65,32 @@ const createPurchaseOrder = async (req, res) => {
             }
         }
 
-        // Generate poNo in format PO-DDMMYY-01
+        // Generate poNo in format PO-DDMMYY-XX
         const date = new Date(poDate);
         const day = String(date.getDate()).padStart(2, '0');
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const year = String(date.getFullYear()).slice(-2);
         const dateString = `${day}${month}${year}`;
+
+        // Find the most recent PO regardless of date
         const lastPO = await PurchaseOrder.findOne({
-            where: { poNo: { [Op.like]: `PO-${dateString}-%` } },
+            where: { poNo: { [Op.like]: `PO-%` } },
             order: [['poNo', 'DESC']]
         });
 
         let sequence = 1;
         if (lastPO && lastPO.poNo) {
             const parts = lastPO.poNo.split('-');
-            if (parts.length === 3 && !isNaN(parts[2])) {
-                sequence = parseInt(parts[2], 10) + 1;
+            const lastSeq = parts[2];
+            if (!isNaN(lastSeq)) {
+                sequence = parseInt(lastSeq, 10) + 1;
             } else {
                 console.warn(`Invalid poNo format found: ${lastPO.poNo}. Starting sequence at 1.`);
             }
         }
+
         const poNo = `PO-${dateString}-${String(sequence).padStart(2, '0')}`;
+
 
         // Create Purchase Order
         const purchaseOrder = await PurchaseOrder.create({
@@ -107,9 +112,9 @@ const createPurchaseOrder = async (req, res) => {
                 unitId: item.unitId,
                 quantity: item.quantity,
                 rate: item.rate,
+                discount: item.discount, // store discount as percentage
                 amount: item.quantity * item.rate,
-                discount: item.discount || 0,
-                totalAmount: (item.quantity * item.rate) - (item.discount || 0)
+                totalAmount: (item.quantity * item.rate) * (1 - (item.discount / 100)) // calculate total amount with discount
             }));
             await OrderItem.bulkCreate(orderItemData);
         }
@@ -243,7 +248,7 @@ const updatePurchaseOrder = async (req, res) => {
                     rate: item.rate,
                     amount: item.quantity * item.rate,
                     discount: item.discount || 0,
-                    totalAmount: (item.quantity * item.rate) - (item.discount || 0),
+                    totalAmount: (item.quantity * item.rate) * (1 - (item.discount / 100)) // calculate total amount with discount
                 };
 
                 if (item.id) {
