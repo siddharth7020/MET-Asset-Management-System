@@ -1,5 +1,6 @@
 const GRN = require('../../models/purchase/GRN');
 const GRNItem = require('../../models/purchase/GRNItem');
+const QuickGRNItem = require('../../models/purchase/quickGRNItem');
 const PurchaseOrder = require('../../models/purchase/PurchaseOrder');
 const OrderItem = require('../../models/purchase/OrderItem');
 const StockStorage = require('../../models/distribution/stockStorage');
@@ -156,7 +157,7 @@ const createGRN = async (req, res) => {
                 orderItemId: orderItem.id, 
                 remainingQuantity, 
                 itemId: orderItem.itemId, 
-                unitId: orderItem.unitId // Fetch unitId from OrderItem
+                unitId: orderItem.unitId
             };
         }));
 
@@ -171,22 +172,52 @@ const createGRN = async (req, res) => {
             });
         }
 
-        // Generate storeCode for each GRNItem in format item-DDMMYY-N
-        const storeCodePromises = validGrnItems.map(async (item) => {
-            const lastStoreCode = await GRNItem.findOne({
-                where: { storeCode: { [Op.like]: `item-${dateString}-%` } },
-                order: [['storeCode', 'DESC']]
-            });
-            let storeSequence = 1;
-            if (lastStoreCode) {
-                const lastStoreSequence = parseInt(lastStoreCode.storeCode.split('-')[2], 10);
-                storeSequence = lastStoreSequence + 1;
-            }
-            return `item-${dateString}-${storeSequence}`;
-        });
-        const storeCodes = await Promise.all(storeCodePromises);
-
+        // Start transaction
         const transaction = await sequelize.transaction();
+
+        // Generate unique storeCode for each GRNItem in format item-DDMMYY-N
+        let storeSequence = 1;
+        // Query both GRNItem and QuickGRNItem for the highest sequence
+        const lastGRNItem = await GRNItem.findOne({
+            where: { storeCode: { [Op.like]: 'item-%' } },
+            order: [['storeCode', 'DESC']],
+            transaction
+        });
+
+        const lastQuickGRNItem = await QuickGRNItem.findOne({
+            where: { storeCode: { [Op.like]: 'item-%' } },
+            order: [['storeCode', 'DESC']],
+            transaction
+        });
+
+        const sequences = [];
+
+        if (lastGRNItem && lastGRNItem.storeCode) {
+            const parts = lastGRNItem.storeCode.split('-');
+            if (parts.length === 3) {
+                const lastSequence = parseInt(parts[2], 10);
+                if (!isNaN(lastSequence)) sequences.push(lastSequence);
+            }
+        }
+
+        if (lastQuickGRNItem && lastQuickGRNItem.storeCode) {
+            const parts = lastQuickGRNItem.storeCode.split('-');
+            if (parts.length === 3) {
+                const lastSequence = parseInt(parts[2], 10);
+                if (!isNaN(lastSequence)) sequences.push(lastSequence);
+            }
+        }
+
+        if (sequences.length > 0) {
+            storeSequence = Math.max(...sequences) + 1;
+        }
+
+        // Generate storeCodes for all items in this GRN
+        const storeCodes = validGrnItems.map((_, index) => {
+            const nextSequence = storeSequence + index;
+            return `Item-${dateString}-${nextSequence}`;
+        });
+
         let createdGRN;
         try {
             // Create GRN
@@ -221,8 +252,8 @@ const createGRN = async (req, res) => {
                     grnId: grn.id,
                     orderItemId: item.orderItemId,
                     itemId: orderItem.itemId,
-                    unitId: orderItem.unitId, // Use unitId from OrderItem
-                    storeCode: storeCodes[index], // Assign generated storeCode
+                    unitId: orderItem.unitId,
+                    storeCode: storeCodes[index],
                     receivedQuantity,
                     rejectedQuantity
                 };
@@ -364,7 +395,7 @@ const updateGRN = async (req, res) => {
             }
         }
 
-        // Generate storeCode for new GRNItems in format item-DDMMYY-N
+        // Generate DDMMYY for new storeCodes
         const date = new Date(grnDate || grn.grnDate);
         const day = String(date.getDate()).padStart(2, '0');
         const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -423,20 +454,48 @@ const updateGRN = async (req, res) => {
 
                 // Generate storeCodes for new items
                 const newGrnItems = grnItems.filter(item => !item.id);
-                const storeCodePromises = newGrnItems.map(async () => {
-                    const lastStoreCode = await GRNItem.findOne({
-                        where: { storeCode: { [Op.like]: `item-${dateString}-%` } },
-                        order: [['storeCode', 'DESC']],
-                        transaction
-                    });
-                    let storeSequence = 1;
-                    if (lastStoreCode) {
-                        const lastStoreSequence = parseInt(lastStoreCode.storeCode.split('-')[2], 10);
-                        storeSequence = lastStoreSequence + 1;
-                    }
-                    return `item-${dateString}-${storeSequence}`;
+                let storeSequence = 1;
+                // Query both GRNItem and QuickGRNItem for the highest sequence
+                const lastGRNItem = await GRNItem.findOne({
+                    where: { storeCode: { [Op.like]: 'item-%' } },
+                    order: [['storeCode', 'DESC']],
+                    transaction
                 });
-                const storeCodes = await Promise.all(storeCodePromises);
+
+                const lastQuickGRNItem = await QuickGRNItem.findOne({
+                    where: { storeCode: { [Op.like]: 'item-%' } },
+                    order: [['storeCode', 'DESC']],
+                    transaction
+                });
+
+                const sequences = [];
+
+                if (lastGRNItem && lastGRNItem.storeCode) {
+                    const parts = lastGRNItem.storeCode.split('-');
+                    if (parts.length === 3) {
+                        const lastSequence = parseInt(parts[2], 10);
+                        if (!isNaN(lastSequence)) sequences.push(lastSequence);
+                    }
+                }
+
+                if (lastQuickGRNItem && lastQuickGRNItem.storeCode) {
+                    const parts = lastQuickGRNItem.storeCode.split('-');
+                    if (parts.length === 3) {
+                        const lastSequence = parseInt(parts[2], 10);
+                        if (!isNaN(lastSequence)) sequences.push(lastSequence);
+                    }
+                }
+
+                if (sequences.length > 0) {
+                    storeSequence = Math.max(...sequences) + 1;
+                }
+
+                // Generate storeCodes for new items
+                const storeCodes = newGrnItems.map((_, index) => {
+                    const nextSequence = storeSequence + index;
+                    return `item-${dateString}-${nextSequence}`;
+                });
+
                 let storeCodeIndex = 0;
 
                 for (const item of grnItems) {
@@ -469,7 +528,7 @@ const updateGRN = async (req, res) => {
                         grnId: grn.id,
                         orderItemId: item.orderItemId,
                         itemId: orderItem.itemId,
-                        unitId: orderItem.unitId, // Use unitId from OrderItem
+                        unitId: orderItem.unitId,
                         storeCode: item.id ? (grn.grnItems.find(gi => gi.id === item.id)?.storeCode || storeCodes[storeCodeIndex++]) : storeCodes[storeCodeIndex++],
                         receivedQuantity: item.receivedQuantity,
                         rejectedQuantity,
