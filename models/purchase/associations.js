@@ -70,9 +70,14 @@ const defineAssociations = () => {
     QuickGRN.hasMany(QuickGRNItem, { foreignKey: 'qGRNId', as: 'items' });
     QuickGRNItem.belongsTo(QuickGRN, { foreignKey: 'qGRNId', as: 'quickGRN' });
 
+    //QuickGRNItem -> Unit
+    QuickGRNItem.belongsTo(Unit, { foreignKey: 'unitId', as: 'unit' });
+    Unit.hasMany(QuickGRNItem, { foreignKey: 'unitId', as: 'quickGRNItems' });
+
     // QuickInvoice -> QuickInvoiceItem
     QuickInvoice.hasMany(QuickInvoiceItem, { foreignKey: 'qInvoiceId', as: 'quickInvoiceItems' });
     QuickInvoiceItem.belongsTo(QuickInvoice, { foreignKey: 'qInvoiceId' });
+
 
     // Distribution Module
     Distribution.hasMany(DistributionItem, { foreignKey: 'distributionId', as: 'items' });

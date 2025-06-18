@@ -11,9 +11,17 @@ const QuickGRNItem = sequelize.define('quickGRNItem', {
         type: DataTypes.INTEGER,
         allowNull: false
     },
+    storeCode: {
+        type: DataTypes.STRING,
+        allowNull: false
+    },
     itemId: {
         type: DataTypes.INTEGER,
         allowNull: false
+    },
+    unitId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
     },
     quantity: {
         type: DataTypes.INTEGER,

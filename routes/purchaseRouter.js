@@ -45,13 +45,11 @@ router.post('/returns/create', ReturnController.createReturn);
 router.put('/:poId', purchaseOrderController.updatePurchaseOrder);
 router.put('/:poId/grns/:grnId', GRNController.updateGRN);
 router.put('/invoices/:id', invoiceController.updateInvoice);
-router.put('/quick-grns/:id', QuickGRNController.updateQuickGRN);
 router.put('/quick-invoices/:id', QuickInvoiceController.updateQuickInvoice);
 router.put('/distributions/:id', DistributionController.updateDistribution);
 
 // DELETE routes
 router.delete('/:poId', purchaseOrderController.deletePurchaseOrder);
 router.delete('/:poId/grns/:grnId', GRNController.deleteGRN);
-router.delete('/quick-grns/:id', QuickGRNController.deleteQuickGRN);
 
 module.exports = router;
