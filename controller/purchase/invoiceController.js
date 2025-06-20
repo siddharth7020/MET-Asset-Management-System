@@ -121,6 +121,7 @@ const createInvoice = async (req, res) => {
                 invoiceId: null, // Set after invoice creation
                 orderItemId: item.orderItemId,
                 itemId: orderItem.itemId,
+                unitId: orderItem.unitId, // Assuming unitId is available in OrderItem
                 quantity: orderItem.quantity,
                 rate: orderItem.rate,
                 discount: orderItem.discount || 0,
@@ -286,6 +287,7 @@ const updateInvoice = async (req, res) => {
                 invoiceId: invoice.id,
                 orderItemId: item.orderItemId,
                 itemId: orderItem.itemId,
+                unitId: orderItem.unitId,
                 quantity: orderItem.quantity,
                 rate: orderItem.rate,
                 discount: orderItem.discount || 0,
