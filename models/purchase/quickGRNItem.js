@@ -37,15 +37,6 @@ const QuickGRNItem = sequelize.define('quickGRNItem', {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false
     },
-    discount: {
-        type: DataTypes.DECIMAL(10, 2),
-        defaultValue: 0.00,
-        validate: { min: 0 }
-    },
-    totalAmount: {
-        type: DataTypes.DECIMAL(10, 2),
-        allowNull: false
-    },
 }, {
     tableName: 'quick_grn_item',
     timestamps: true

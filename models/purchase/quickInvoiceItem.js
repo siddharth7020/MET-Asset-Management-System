@@ -36,8 +36,13 @@ const QuickInvoiceItem = sequelize.define('quickInvoiceItem', {
         allowNull: false
     },
     discount: {
+        type: DataTypes.DECIMAL(5, 2),
+        allowNull: false,
+        defaultValue: 0.00,
+    },
+    amount: {
         type: DataTypes.DECIMAL(10, 2),
-        allowNull: true
+        allowNull: false
     },
     taxPercentage: {
         type: DataTypes.DECIMAL(5, 2),

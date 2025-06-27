@@ -190,8 +190,6 @@ const createQuickGRN = async (req, res) => {
                     quantity: item.quantity,
                     rate: item.rate,
                     amount: item.quantity * item.rate,
-                    discount: item.discount || 0,
-                    totalAmount: (item.quantity * item.rate) * (1 - (item.discount / 100))
                 }));
                 await QuickGRNItem.bulkCreate(quickGRNItemData, { transaction });
             }
