@@ -4,6 +4,7 @@ const QuickInvoice = require('../../models/purchase/quickInvoice');
 const QuickGRN = require('../../models/purchase/quickGRN');
 const { Sequelize } = require('sequelize');
 const moment = require('moment');
+const path = require('path');
 
 // Utility function for calculations
 const calculateItemAmounts = (quantity, rate, discount, taxPercentage) => {
@@ -39,9 +40,23 @@ const createQuickInvoice = async (req, res) => {
   const t = await QuickInvoice.sequelize.transaction();
 
   try {
-    const { qGRNIds, qInvoiceDate, remark, taxDetails, quickInvoiceItems } = req.body;
+    // Parse FormData fields
+    let { qGRNIds, qInvoiceDate, remark, taxDetails, quickInvoiceItems, existingDocuments } = req.body;
+    
+    // Parse JSON-stringified fields
+    try {
+      qGRNIds = qGRNIds ? JSON.parse(qGRNIds) : [];
+      taxDetails = taxDetails ? JSON.parse(taxDetails) : {};
+      quickInvoiceItems = quickInvoiceItems ? JSON.parse(quickInvoiceItems) : [];
+      existingDocuments = existingDocuments ? JSON.parse(existingDocuments) : [];
+    } catch (error) {
+      await t.rollback();
+      return res.status(400).json({ message: 'Invalid JSON format in form data.' });
+    }
 
-    console.log('Create Quick Invoice Payload:', JSON.stringify({ qGRNIds, qInvoiceDate, remark, taxDetails, quickInvoiceItems }, null, 2));
+    let documentPaths = Array.isArray(existingDocuments) ? existingDocuments : [];
+
+    console.log('Create Quick Invoice Payload:', JSON.stringify({ qGRNIds, qInvoiceDate, remark, taxDetails, quickInvoiceItems, documentPaths }, null, 2));
 
     // Validate inputs
     if (!qGRNIds || !Array.isArray(qGRNIds) || qGRNIds.length === 0) {
@@ -59,6 +74,33 @@ const createQuickInvoice = async (req, res) => {
     if (!taxDetails || typeof taxDetails !== 'object') {
       await t.rollback();
       return res.status(400).json({ message: 'taxDetails must be provided as an object.' });
+    }
+
+    // Handle file uploads
+    if (req.files && req.files.documents) {
+      const files = Array.isArray(req.files.documents) ? req.files.documents : [req.files.documents];
+      
+      // Validate file types and sizes
+      for (const file of files) {
+        const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+        if (!allowedTypes.includes(file.mimetype)) {
+          await t.rollback();
+          return res.status(400).json({ message: `Invalid file type for ${file.name}. Allowed types: PDF, JPEG, PNG.` });
+        }
+        if (file.size > 10 * 1024 * 1024) {
+          await t.rollback();
+          return res.status(400).json({ message: `File ${file.name} exceeds 10MB limit.` });
+        }
+      }
+
+      // Move files to uploads directory and store paths
+      for (const file of files) {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        const fileName = `${uniqueSuffix}-${file.name}`;
+        const filePath = path.join('uploads', fileName);
+        await file.mv(path.join(__dirname, '..', '..', filePath));
+        documentPaths.push(`/uploads/${fileName}`);
+      }
     }
 
     // Fetch all items related to the selected GRNs
@@ -109,7 +151,7 @@ const createQuickInvoice = async (req, res) => {
         throw new Error(`GRN item not found for qGRNItemid: ${item.qGRNItemid}`);
       }
       const taxPercentage = Number(taxDetails[item.qGRNItemid].taxPercentage);
-      const discount = Number(item.discount); // Use discount from quickInvoiceItems
+      const discount = Number(item.discount);
       console.log(`Processing item ${item.qGRNItemid} with discount=${discount}`);
       const { amount, taxAmount, totalAmount } = calculateItemAmounts(
         item.quantity,
@@ -143,6 +185,7 @@ const createQuickInvoice = async (req, res) => {
         qGRNIds,
         totalAmount: parseFloat(invoiceTotal.toFixed(2)),
         remark,
+        document: documentPaths,
       },
       { transaction: t }
     );
@@ -201,9 +244,23 @@ const updateQuickInvoice = async (req, res) => {
 
   try {
     const { id } = req.params;
-    const { qGRNIds, qInvoiceDate, remark, quickInvoiceItems, taxDetails } = req.body;
+    // Parse FormData fields
+    let { qGRNIds, qInvoiceDate, remark, quickInvoiceItems, taxDetails, existingDocuments } = req.body;
 
-    console.log('Update Quick Invoice Payload:', JSON.stringify({ qGRNIds, qInvoiceDate, remark, quickInvoiceItems, taxDetails }, null, 2));
+    // Parse JSON-stringified fields
+    try {
+      qGRNIds = qGRNIds ? JSON.parse(qGRNIds) : [];
+      taxDetails = taxDetails ? JSON.parse(taxDetails) : {};
+      quickInvoiceItems = quickInvoiceItems ? JSON.parse(quickInvoiceItems) : [];
+      existingDocuments = existingDocuments ? JSON.parse(existingDocuments) : [];
+    } catch (error) {
+      await t.rollback();
+      return res.status(400).json({ message: 'Invalid JSON format in form data.' });
+    }
+
+    let documentPaths = Array.isArray(existingDocuments) ? existingDocuments : [];
+
+    console.log('Update Quick Invoice Payload:', JSON.stringify({ qGRNIds, qInvoiceDate, remark, quickInvoiceItems, taxDetails, documentPaths }, null, 2));
 
     // Validate inputs
     if (!qGRNIds || !Array.isArray(qGRNIds) || qGRNIds.length === 0) {
@@ -221,6 +278,33 @@ const updateQuickInvoice = async (req, res) => {
     if (!taxDetails || typeof taxDetails !== 'object') {
       await t.rollback();
       return res.status(400).json({ message: 'taxDetails must be provided as an object.' });
+    }
+
+    // Handle file uploads
+    if (req.files && req.files.documents) {
+      const files = Array.isArray(req.files.documents) ? req.files.documents : [req.files.documents];
+      
+      // Validate file types and sizes
+      for (const file of files) {
+        const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+        if (!allowedTypes.includes(file.mimetype)) {
+          await t.rollback();
+          return res.status(400).json({ message: `Invalid file type for ${file.name}. Allowed types: PDF, JPEG, PNG.` });
+        }
+        if (file.size > 10 * 1024 * 1024) {
+          await t.rollback();
+          return res.status(400).json({ message: `File ${file.name} exceeds 10MB limit.` });
+        }
+      }
+
+      // Move files to uploads directory and store paths
+      for (const file of files) {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        const fileName = `${uniqueSuffix}-${file.name}`;
+        const filePath = path.join('uploads', fileName);
+        await file.mv(path.join(__dirname, '..', '..', filePath));
+        documentPaths.push(`/uploads/${fileName}`);
+      }
     }
 
     // Find the QuickInvoice
@@ -305,7 +389,7 @@ const updateQuickInvoice = async (req, res) => {
       }
 
       const taxPercentage = Number(taxDetails[item.qGRNItemid].taxPercentage);
-      const discount = Number(item.discount); // Use discount from quickInvoiceItems
+      const discount = Number(item.discount);
       console.log(`Updating item ${item.qGRNItemid} with discount=${discount}`);
       const { amount, taxAmount, totalAmount } = calculateItemAmounts(
         item.quantity,
@@ -341,6 +425,7 @@ const updateQuickInvoice = async (req, res) => {
         qGRNIds,
         totalAmount: parseFloat(invoiceTotal.toFixed(2)),
         remark,
+        document: documentPaths,
       },
       { transaction: t }
     );
