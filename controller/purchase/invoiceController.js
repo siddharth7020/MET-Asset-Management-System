@@ -101,16 +101,22 @@ const createInvoice = async (req, res) => {
                 throw new Error(`Item ID not found for Order Item ${item.orderItemId}`);
             }
 
-            // Base amount before tax (quantity * rate - discount)
-            const amount = orderItem.quantity * orderItem.rate - (orderItem.discount || 0);
+            // Calculate subtotal before discount
+            const itemSubtotal = orderItem.quantity * orderItem.rate;
+
+            // Calculate discount amount (discount as percentage)
+            const discountAmount = (itemSubtotal * (orderItem.discount || 0)) / 100;
+
+            // Base amount after discount
+            const amount = itemSubtotal - discountAmount;
 
             // Tax percentage (e.g., 18 for 18%)
             const taxPercentage = item.taxPercentage || 0;
 
-            // Tax amount = (base amount * tax percentage) / 100
+            // Tax amount
             const taxAmount = (amount * taxPercentage) / 100;
 
-            // Total amount = base amount + tax amount
+            // Total amount
             const totalAmount = amount + taxAmount;
 
             subtotal += amount;
@@ -121,12 +127,13 @@ const createInvoice = async (req, res) => {
                 invoiceId: null, // Set after invoice creation
                 orderItemId: item.orderItemId,
                 itemId: orderItem.itemId,
-                unitId: orderItem.unitId, // Assuming unitId is available in OrderItem
+                unitId: orderItem.unitId,
                 quantity: orderItem.quantity,
                 rate: orderItem.rate,
                 discount: orderItem.discount || 0,
                 taxPercentage,
                 taxAmount,
+                amount: amount.toFixed(2), // Explicitly include amount
                 totalAmount
             };
         });
@@ -266,16 +273,22 @@ const updateInvoice = async (req, res) => {
                 throw new Error(`Item ID not found for Order Item ${item.orderItemId}`);
             }
 
-            // Base amount before tax (quantity * rate - discount)
-            const amount = orderItem.quantity * orderItem.rate - (orderItem.discount || 0);
+            // Calculate subtotal before discount
+            const itemSubtotal = orderItem.quantity * orderItem.rate;
+
+            // Calculate discount amount (discount as percentage)
+            const discountAmount = (itemSubtotal * (orderItem.discount || 0)) / 100;
+
+            // Base amount after discount
+            const amount = itemSubtotal - discountAmount;
 
             // Tax percentage (e.g., 18 for 18%)
             const taxPercentage = item.taxPercentage || 0;
 
-            // Tax amount = (base amount * tax percentage) / 100
+            // Tax amount
             const taxAmount = (amount * taxPercentage) / 100;
 
-            // Total amount = base amount + tax amount
+            // Total amount
             const totalAmount = amount + taxAmount;
 
             subtotal += amount;
@@ -293,6 +306,7 @@ const updateInvoice = async (req, res) => {
                 discount: orderItem.discount || 0,
                 taxPercentage,
                 taxAmount,
+                amount: amount.toFixed(2), // Explicitly include amount
                 totalAmount
             };
         });
@@ -321,6 +335,7 @@ const updateInvoice = async (req, res) => {
                         discount: item.discount,
                         taxPercentage: item.taxPercentage,
                         taxAmount: item.taxAmount,
+                        amount: item.amount, // Include amount
                         totalAmount: item.totalAmount
                     },
                     { where: { id: item.id, invoiceId: invoice.id } }
