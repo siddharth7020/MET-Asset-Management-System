@@ -86,6 +86,8 @@ const defineAssociations = () => {
     Distribution.belongsTo(FinancialYear, { foreignKey: 'financialYearId', as: 'financialYear' });
     Distribution.belongsTo(Institute, { foreignKey: 'instituteId', as: 'institute' });
     Distribution.belongsTo(Location, { foreignKey: 'location', as: 'locationData' });
+    // In DistributionItem model
+    DistributionItem.belongsTo(Unit, { as: 'unit', foreignKey: 'unitId' });
 
 
     // Optional: Inverse relationships for Item

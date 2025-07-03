@@ -2,6 +2,7 @@ const { Op } = require('sequelize');
 const Distribution = require('../../models/distribution/Distribution');
 const DistributionItem = require('../../models/distribution/DistributionItem');
 const Item = require('../../models/master/item');
+const Unit = require('../../models/master/unit'); // Assuming a Unit model exists
 const StockStorage = require('../../models/distribution/stockStorage');
 const FinancialYear = require('../../models/master/financialYear');
 const Institute = require('../../models/master/institute');
@@ -13,7 +14,14 @@ const getAllDistributions = async (req, res) => {
     try {
         const distributions = await Distribution.findAll({
             include: [
-                { model: DistributionItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] },
+                { 
+                    model: DistributionItem, 
+                    as: 'items', 
+                    include: [
+                        { model: Item, as: 'item', attributes: ['itemName'] },
+                        { model: Unit, as: 'unit', attributes: ['uniteCode'] } // Include Unit in response
+                    ]
+                },
                 { model: Location, as: 'locationData', attributes: ['locationID', 'floor', 'room'] }
             ]
         });
@@ -101,8 +109,9 @@ const createDistribution = async (req, res) => {
             return res.status(404).json({ message: `Institute with ID ${instituteId} not found` });
         }
 
-        // Validate items and stock availability
+        // Validate items, unitId, and stock availability
         const itemIds = items.map(item => item.itemId);
+        const unitIds = items.map(item => item.unitId).filter(id => id !== undefined);
         const stockEntries = await StockStorage.findAll({
             where: { itemId: itemIds },
             attributes: ['itemId', [sequelize.fn('SUM', sequelize.col('quantity')), 'totalStock']],
@@ -110,13 +119,18 @@ const createDistribution = async (req, res) => {
         });
 
         for (const item of items) {
-            if (!item.itemId || !item.issueQuantity || item.issueQuantity <= 0) {
-                return res.status(400).json({ message: `Invalid item data for itemId ${item.itemId}` });
+            if (!item.itemId || !item.unitId || !item.issueQuantity || item.issueQuantity <= 0) {
+                return res.status(400).json({ message: `Invalid item data: itemId, unitId, and issueQuantity are required and issueQuantity must be > 0 for itemId ${item.itemId}` });
             }
 
             const dbItem = await Item.findByPk(item.itemId);
             if (!dbItem) {
                 return res.status(404).json({ message: `Item with ID ${item.itemId} not found` });
+            }
+
+            const dbUnit = await Unit.findByPk(item.unitId);
+            if (!dbUnit) {
+                return res.status(404).json({ message: `Unit with ID ${item.unitId} not found` });
             }
 
             const stock = stockEntries.find(se => se.itemId === item.itemId);
@@ -149,6 +163,7 @@ const createDistribution = async (req, res) => {
             const distributionItems = items.map(item => ({
                 distributionId: distribution.id,
                 itemId: item.itemId,
+                unitId: item.unitId,
                 issueQuantity: item.issueQuantity
             }));
             await DistributionItem.bulkCreate(distributionItems, { transaction });
@@ -188,7 +203,14 @@ const createDistribution = async (req, res) => {
         try {
             const createdDistribution = await Distribution.findByPk(distribution.id, {
                 include: [
-                    { model: DistributionItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] },
+                    { 
+                        model: DistributionItem, 
+                        as: 'items', 
+                        include: [
+                            { model: Item, as: 'item', attributes: ['itemName'] },
+                           { model: Unit, as: 'unit', attributes: ['uniteCode'] } 
+                        ]
+                    },
                     { model: Location, as: 'locationData', attributes: ['locationID', 'floor', 'room'] }
                 ]
             });
@@ -280,12 +302,16 @@ const updateDistribution = async (req, res) => {
             }
             newItemIds = items.map(item => item.itemId);
             for (const item of items) {
-                if (!item.itemId || !item.issueQuantity || item.issueQuantity <= 0) {
-                    return res.status(400).json({ message: `Invalid item data for itemId ${item.itemId}` });
+                if (!item.itemId || !item.unitId || !item.issueQuantity || item.issueQuantity <= 0) {
+                    return res.status(400).json({ message: `Invalid item data: itemId, unitId, and issueQuantity are required and issueQuantity must be > 0 for itemId ${item.itemId}` });
                 }
                 const dbItem = await Item.findByPk(item.itemId);
                 if (!dbItem) {
                     return res.status(404).json({ message: `Item with ID ${item.itemId} not found` });
+                }
+                const dbUnit = await Unit.findByPk(item.unitId);
+                if (!dbUnit) {
+                    return res.status(404).json({ message: `Unit with ID ${item.unitId} not found` });
                 }
             }
         }
@@ -310,11 +336,11 @@ const updateDistribution = async (req, res) => {
             if (items && Array.isArray(items)) {
                 // Calculate stock adjustments
                 const existingItems = distribution.items.reduce((acc, item) => {
-                    acc[item.itemId] = item.issueQuantity;
+                    acc[item.itemId] = { issueQuantity: item.issueQuantity, unitId: item.unitId };
                     return acc;
                 }, {});
                 const newItems = items.reduce((acc, item) => {
-                    acc[item.itemId] = item.issueQuantity;
+                    acc[item.itemId] = { issueQuantity: item.issueQuantity, unitId: item.unitId };
                     return acc;
                 }, {});
 
@@ -327,7 +353,7 @@ const updateDistribution = async (req, res) => {
                 });
 
                 for (const item of items) {
-                    const oldQuantity = existingItems[item.itemId] || 0;
+                    const oldQuantity = existingItems[item.itemId]?.issueQuantity || 0;
                     const quantityDiff = item.issueQuantity - oldQuantity;
                     if (quantityDiff > 0) {
                         const stock = stockEntries.find(se => se.itemId === item.itemId);
@@ -341,7 +367,7 @@ const updateDistribution = async (req, res) => {
 
                 // Restore stock for removed or reduced items
                 for (const existingItem of distribution.items) {
-                    const newQuantity = newItems[existingItem.itemId] || 0;
+                    const newQuantity = newItems[existingItem.itemId]?.issueQuantity || 0;
                     const quantityDiff = existingItem.issueQuantity - newQuantity;
                     if (quantityDiff > 0) {
                         const stockRecords = await StockStorage.findAll({
@@ -371,13 +397,14 @@ const updateDistribution = async (req, res) => {
                 const distributionItems = items.map(item => ({
                     distributionId: id,
                     itemId: item.itemId,
+                    unitId: item.unitId,
                     issueQuantity: item.issueQuantity
                 }));
                 await DistributionItem.bulkCreate(distributionItems, { transaction });
 
                 // Deduct stock for new or increased items
                 for (const item of items) {
-                    const oldQuantity = existingItems[item.itemId] || 0;
+                    const oldQuantity = existingItems[item.itemId]?.issueQuantity || 0;
                     const quantityDiff = item.issueQuantity - oldQuantity;
                     if (quantityDiff > 0) {
                         let remainingQuantity = quantityDiff;
@@ -412,7 +439,14 @@ const updateDistribution = async (req, res) => {
         try {
             const updatedDistribution = await Distribution.findByPk(id, {
                 include: [
-                    { model: DistributionItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] },
+                    { 
+                        model: DistributionItem, 
+                        as: 'items', 
+                        include: [
+                            { model: Item, as: 'item', attributes: ['itemName'] },
+                           { model: Unit, as: 'unit', attributes: ['uniteCode'] } 
+                        ]
+                    },
                     { model: Location, as: 'locationData', attributes: ['locationID', 'floor', 'room'] }
                 ]
             });
@@ -445,7 +479,14 @@ const getDistributionById = async (req, res) => {
         const { id } = req.params;
         const distribution = await Distribution.findByPk(id, {
             include: [
-                { model: DistributionItem, as: 'items', include: [{ model: Item, as: 'item', attributes: ['itemName'] }] },
+                { 
+                    model: DistributionItem, 
+                    as: 'items', 
+                    include: [
+                        { model: Item, as: 'item', attributes: ['itemName'] },
+                       { model: Unit, as: 'unit', attributes: ['uniteCode'] } 
+                    ]
+                },
                 { model: Location, as: 'locationData', attributes: ['locationID', 'floor', 'room'] }
             ]
         });

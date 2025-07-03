@@ -15,6 +15,10 @@ const DistributionItem = sequelize.define('DistributionItem', {
         type: DataTypes.INTEGER,
         allowNull: false
     },
+    unitId: {
+        type: DataTypes.INTEGER,
+        allowNull: false
+    },
     issueQuantity: {
         type: DataTypes.INTEGER,
         allowNull: false,
