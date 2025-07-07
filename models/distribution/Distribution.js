@@ -40,9 +40,16 @@ const Distribution = sequelize.define('Distribution', {
         type: DataTypes.STRING,
         allowNull: false
     },
-    documents: {
-        type: DataTypes.STRING, // Store file path or URL
-        allowNull: true
+    document: {
+        type: DataTypes.STRING(1000), // Stores JSON array of file paths
+        allowNull: true,
+        get() {
+            const value = this.getDataValue('document');
+            return value ? JSON.parse(value) : [];
+        },
+        set(value) {
+            this.setDataValue('document', value ? JSON.stringify(value) : null);
+        }
     },
     remark: {
         type: DataTypes.TEXT,

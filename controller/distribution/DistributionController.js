@@ -2,12 +2,18 @@ const { Op } = require('sequelize');
 const Distribution = require('../../models/distribution/Distribution');
 const DistributionItem = require('../../models/distribution/DistributionItem');
 const Item = require('../../models/master/item');
-const Unit = require('../../models/master/unit'); // Assuming a Unit model exists
+const Unit = require('../../models/master/unit');
 const StockStorage = require('../../models/distribution/stockStorage');
 const FinancialYear = require('../../models/master/financialYear');
 const Institute = require('../../models/master/institute');
 const Location = require('../../models/master/location');
 const sequelize = require('../../config/database');
+const path = require('path');
+const fs = require('fs').promises;
+
+// Ensure the uploads directory exists
+const uploadDir = path.join(__dirname, '../../Uploads');
+fs.mkdir(uploadDir, { recursive: true }).catch(err => console.error('Error creating uploads directory:', err));
 
 // GET all Distributions
 const getAllDistributions = async (req, res) => {
@@ -19,7 +25,7 @@ const getAllDistributions = async (req, res) => {
                     as: 'items', 
                     include: [
                         { model: Item, as: 'item', attributes: ['itemName'] },
-                        { model: Unit, as: 'unit', attributes: ['uniteCode'] } // Include Unit in response
+                        { model: Unit, as: 'unit', attributes: ['uniteCode'] }
                     ]
                 },
                 { model: Location, as: 'locationData', attributes: ['locationID', 'floor', 'room'] }
@@ -43,13 +49,23 @@ const createDistribution = async (req, res) => {
             floor,
             rooms,
             distributionDate = new Date(),
-            documents,
             remark,
-            items
+            items,
+            existingDocuments
         } = req.body;
 
+        // Parse items if sent as a string
+        let parsedItems = items;
+        if (typeof items === 'string') {
+            try {
+                parsedItems = JSON.parse(items);
+            } catch (error) {
+                return res.status(400).json({ message: 'Invalid items format, must be a valid JSON array' });
+            }
+        }
+
         // Validate required fields
-        if (!financialYearId || !instituteId || !employeeName || !location || !floor || !rooms || typeof rooms !== 'string' || !distributionDate || !items || !Array.isArray(items) || items.length === 0) {
+        if (!financialYearId || !instituteId || !employeeName || !location || !floor || !rooms || typeof rooms !== 'string' || !distributionDate || !parsedItems || !Array.isArray(parsedItems) || parsedItems.length === 0) {
             return res.status(400).json({ message: 'financialYearId, instituteId, employeeName, location, floor, rooms (string), distributionDate, and items are required' });
         }
 
@@ -58,16 +74,14 @@ const createDistribution = async (req, res) => {
             return res.status(400).json({ message: 'Invalid distributionDate format' });
         }
 
-        // Validate location (locationID) and rooms
+        // Validate location and rooms
         const locationRecord = await Location.findByPk(location);
         if (!locationRecord) {
             return res.status(404).json({ message: `Location with ID ${location} not found` });
         }
-        // Validate that rooms is a valid room in the location
         if (!locationRecord.room.includes(rooms)) {
             return res.status(400).json({ message: `Room '${rooms}' is not available in the selected location` });
         }
-        // Validate that floor matches the location
         if (floor !== locationRecord.floor) {
             return res.status(400).json({ message: `Floor '${floor}' does not match the location's floor '${locationRecord.floor}'` });
         }
@@ -110,15 +124,15 @@ const createDistribution = async (req, res) => {
         }
 
         // Validate items, unitId, and stock availability
-        const itemIds = items.map(item => item.itemId);
-        const unitIds = items.map(item => item.unitId).filter(id => id !== undefined);
+        const itemIds = parsedItems.map(item => item.itemId);
+        const unitIds = parsedItems.map(item => item.unitId).filter(id => id !== undefined);
         const stockEntries = await StockStorage.findAll({
             where: { itemId: itemIds },
             attributes: ['itemId', [sequelize.fn('SUM', sequelize.col('quantity')), 'totalStock']],
             group: ['itemId']
         });
 
-        for (const item of items) {
+        for (const item of parsedItems) {
             if (!item.itemId || !item.unitId || !item.issueQuantity || item.issueQuantity <= 0) {
                 return res.status(400).json({ message: `Invalid item data: itemId, unitId, and issueQuantity are required and issueQuantity must be > 0 for itemId ${item.itemId}` });
             }
@@ -142,6 +156,37 @@ const createDistribution = async (req, res) => {
             }
         }
 
+        // Handle file uploads
+        let document = [];
+        if (existingDocuments) {
+            try {
+                document = JSON.parse(existingDocuments);
+                if (!Array.isArray(document)) {
+                    console.warn('existingDocuments is not an array:', document);
+                    document = [];
+                }
+            } catch (error) {
+                console.error('Error parsing existingDocuments:', error);
+                document = [];
+            }
+        }
+        console.log('Initial document array:', document); // Debugging
+
+        if (req.files && req.files.documents) {
+            const files = Array.isArray(req.files.documents) ? req.files.documents : [req.files.documents];
+            console.log('Uploaded files:', files); // Debugging
+            for (const file of files) {
+                if (!file.mimetype.startsWith('image/') && !file.mimetype.startsWith('application/pdf')) {
+                    return res.status(400).json({ message: `Invalid file type for ${file.name}. Only images and PDFs are allowed.` });
+                }
+                const fileName = `${Date.now()}-${file.name}`;
+                const filePath = path.join(uploadDir, fileName);
+                await file.mv(filePath);
+                document.push(`/uploads/${fileName}`);
+            }
+        }
+        console.log('Final document array before saving:', document); // Debugging
+
         let distribution;
         const transaction = await sequelize.transaction();
         try {
@@ -155,12 +200,13 @@ const createDistribution = async (req, res) => {
                 rooms,
                 distributionDate,
                 distributionNo,
-                documents,
+                document, // Changed from documents to document
                 remark
             }, { transaction });
+            console.log('Distribution created with document:', distribution.document); // Debugging
 
             // Create Distribution Items
-            const distributionItems = items.map(item => ({
+            const distributionItems = parsedItems.map(item => ({
                 distributionId: distribution.id,
                 itemId: item.itemId,
                 unitId: item.unitId,
@@ -169,7 +215,7 @@ const createDistribution = async (req, res) => {
             await DistributionItem.bulkCreate(distributionItems, { transaction });
 
             // Deduct stock from StockStorage
-            for (const item of items) {
+            for (const item of parsedItems) {
                 let remainingQuantity = item.issueQuantity;
                 const stockRecords = await StockStorage.findAll({
                     where: { itemId: item.itemId, quantity: { [Op.gt]: 0 } },
@@ -196,6 +242,16 @@ const createDistribution = async (req, res) => {
             await transaction.commit();
         } catch (error) {
             await transaction.rollback();
+            // Delete uploaded files if transaction fails
+            for (const doc of document) {
+                if (typeof doc === 'string' && doc.startsWith('/uploads/')) {
+                    try {
+                        await fs.unlink(path.join(__dirname, '../../', doc));
+                    } catch (unlinkError) {
+                        console.error(`Error deleting file ${doc}:`, unlinkError);
+                    }
+                }
+            }
             throw error;
         }
 
@@ -208,7 +264,7 @@ const createDistribution = async (req, res) => {
                         as: 'items', 
                         include: [
                             { model: Item, as: 'item', attributes: ['itemName'] },
-                           { model: Unit, as: 'unit', attributes: ['uniteCode'] } 
+                            { model: Unit, as: 'unit', attributes: ['uniteCode'] }
                         ]
                     },
                     { model: Location, as: 'locationData', attributes: ['locationID', 'floor', 'room'] }
@@ -241,7 +297,17 @@ const createDistribution = async (req, res) => {
 const updateDistribution = async (req, res) => {
     try {
         const { id } = req.params;
-        const { financialYearId, instituteId, employeeName, location, floor, rooms, distributionDate, distributionNo, documents, remark, items } = req.body;
+        const { financialYearId, instituteId, employeeName, location, floor, rooms, distributionDate, distributionNo, remark, items, existingDocuments } = req.body;
+
+        // Parse items if sent as a string
+        let parsedItems = items;
+        if (typeof items === 'string') {
+            try {
+                parsedItems = JSON.parse(items);
+            } catch (error) {
+                return res.status(400).json({ message: 'Invalid items format, must be a valid JSON array' });
+            }
+        }
 
         // Check if distribution exists
         const distribution = await Distribution.findByPk(id, {
@@ -269,13 +335,11 @@ const updateDistribution = async (req, res) => {
             if (!locationRecord) {
                 return res.status(404).json({ message: `Location with ID ${location} not found` });
             }
-            // Validate rooms if provided
             if (rooms && typeof rooms === 'string') {
                 if (!locationRecord.room.includes(rooms)) {
                     return res.status(400).json({ message: `Room '${rooms}' is not available in the selected location` });
                 }
             }
-            // Validate floor if provided
             if (floor && floor !== locationRecord.floor) {
                 return res.status(400).json({ message: `Floor '${floor}' does not match the location's floor '${locationRecord.floor}'` });
             }
@@ -296,12 +360,12 @@ const updateDistribution = async (req, res) => {
 
         // Validate items if provided
         let newItemIds = [];
-        if (items && Array.isArray(items)) {
-            if (items.length === 0) {
+        if (parsedItems && Array.isArray(parsedItems)) {
+            if (parsedItems.length === 0) {
                 return res.status(400).json({ message: 'Items array cannot be empty' });
             }
-            newItemIds = items.map(item => item.itemId);
-            for (const item of items) {
+            newItemIds = parsedItems.map(item => item.itemId);
+            for (const item of parsedItems) {
                 if (!item.itemId || !item.unitId || !item.issueQuantity || item.issueQuantity <= 0) {
                     return res.status(400).json({ message: `Invalid item data: itemId, unitId, and issueQuantity are required and issueQuantity must be > 0 for itemId ${item.itemId}` });
                 }
@@ -316,9 +380,42 @@ const updateDistribution = async (req, res) => {
             }
         }
 
+        // Handle file uploads
+        let document = [];
+        if (existingDocuments) {
+            try {
+                document = JSON.parse(existingDocuments);
+                if (!Array.isArray(document)) {
+                    console.warn('existingDocuments is not an array:', document);
+                    document = [];
+                }
+            } catch (error) {
+                console.error('Error parsing existingDocuments:', error);
+                document = distribution.document || [];
+            }
+        } else {
+            document = distribution.document || [];
+        }
+        console.log('Initial document array:', document); // Debugging
+
+        if (req.files && req.files.documents) {
+            const files = Array.isArray(req.files.documents) ? req.files.documents : [req.files.documents];
+            console.log('Uploaded files:', files); // Debugging
+            for (const file of files) {
+                if (!file.mimetype.startsWith('image/') && !file.mimetype.startsWith('application/pdf')) {
+                    return res.status(400).json({ message: `Invalid file type for ${file.name}. Only images and PDFs are allowed.` });
+                }
+                const fileName = `${Date.now()}-${file.name}`;
+                const filePath = path.join(uploadDir, fileName);
+                await file.mv(filePath);
+                document.push(`/uploads/${fileName}`);
+            }
+        }
+        console.log('Final document array before saving:', document); // Debugging
+
         const transaction = await sequelize.transaction();
         try {
-            // Update Distribution fields (only if provided)
+            // Update Distribution fields
             await distribution.update({
                 financialYearId: financialYearId || distribution.financialYearId,
                 instituteId: instituteId || distribution.instituteId,
@@ -328,18 +425,19 @@ const updateDistribution = async (req, res) => {
                 rooms: rooms || distribution.rooms,
                 distributionDate: distributionDate || distribution.distributionDate,
                 distributionNo: distributionNo || distribution.distributionNo,
-                documents: documents !== undefined ? documents : distribution.documents,
+                document, // Changed from documents to document
                 remark: remark !== undefined ? remark : distribution.remark
             }, { transaction });
+            console.log('Distribution updated with document:', distribution.document); // Debugging
 
             // Handle items update if provided
-            if (items && Array.isArray(items)) {
+            if (parsedItems && Array.isArray(parsedItems)) {
                 // Calculate stock adjustments
                 const existingItems = distribution.items.reduce((acc, item) => {
                     acc[item.itemId] = { issueQuantity: item.issueQuantity, unitId: item.unitId };
                     return acc;
                 }, {});
-                const newItems = items.reduce((acc, item) => {
+                const newItems = parsedItems.reduce((acc, item) => {
                     acc[item.itemId] = { issueQuantity: item.issueQuantity, unitId: item.unitId };
                     return acc;
                 }, {});
@@ -352,7 +450,7 @@ const updateDistribution = async (req, res) => {
                     transaction
                 });
 
-                for (const item of items) {
+                for (const item of parsedItems) {
                     const oldQuantity = existingItems[item.itemId]?.issueQuantity || 0;
                     const quantityDiff = item.issueQuantity - oldQuantity;
                     if (quantityDiff > 0) {
@@ -394,7 +492,7 @@ const updateDistribution = async (req, res) => {
                 await DistributionItem.destroy({ where: { distributionId: id }, transaction });
 
                 // Create new DistributionItems
-                const distributionItems = items.map(item => ({
+                const distributionItems = parsedItems.map(item => ({
                     distributionId: id,
                     itemId: item.itemId,
                     unitId: item.unitId,
@@ -403,7 +501,7 @@ const updateDistribution = async (req, res) => {
                 await DistributionItem.bulkCreate(distributionItems, { transaction });
 
                 // Deduct stock for new or increased items
-                for (const item of items) {
+                for (const item of parsedItems) {
                     const oldQuantity = existingItems[item.itemId]?.issueQuantity || 0;
                     const quantityDiff = item.issueQuantity - oldQuantity;
                     if (quantityDiff > 0) {
@@ -432,6 +530,16 @@ const updateDistribution = async (req, res) => {
             await transaction.commit();
         } catch (error) {
             await transaction.rollback();
+            // Delete newly uploaded files if transaction fails
+            for (const doc of document) {
+                if (typeof doc === 'string' && doc.startsWith('/uploads/')) {
+                    try {
+                        await fs.unlink(path.join(__dirname, '../../', doc));
+                    } catch (unlinkError) {
+                        console.error(`Error deleting file ${doc}:`, unlinkError);
+                    }
+                }
+            }
             throw error;
         }
 
@@ -444,7 +552,7 @@ const updateDistribution = async (req, res) => {
                         as: 'items', 
                         include: [
                             { model: Item, as: 'item', attributes: ['itemName'] },
-                           { model: Unit, as: 'unit', attributes: ['uniteCode'] } 
+                            { model: Unit, as: 'unit', attributes: ['uniteCode'] }
                         ]
                     },
                     { model: Location, as: 'locationData', attributes: ['locationID', 'floor', 'room'] }
@@ -484,7 +592,7 @@ const getDistributionById = async (req, res) => {
                     as: 'items', 
                     include: [
                         { model: Item, as: 'item', attributes: ['itemName'] },
-                       { model: Unit, as: 'unit', attributes: ['uniteCode'] } 
+                        { model: Unit, as: 'unit', attributes: ['uniteCode'] }
                     ]
                 },
                 { model: Location, as: 'locationData', attributes: ['locationID', 'floor', 'room'] }
