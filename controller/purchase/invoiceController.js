@@ -3,6 +3,18 @@ const InvoiceItem = require('../../models/purchase/invoiceItem');
 const PurchaseOrder = require('../../models/purchase/PurchaseOrder');
 const OrderItem = require('../../models/purchase/OrderItem');
 const { Sequelize, Op } = require('sequelize');
+const path = require('path');
+const fs = require('fs').promises;
+
+// Ensure uploads directory exists
+const ensureUploadsDir = async () => {
+    const uploadsDir = path.join(__dirname, '../../uploads');
+    try {
+        await fs.mkdir(uploadsDir, { recursive: true });
+    } catch (error) {
+        console.error('Error creating uploads directory:', error);
+    }
+};
 
 // Get all invoices
 const getAllInvoices = async (req, res) => {
@@ -40,9 +52,25 @@ const createInvoice = async (req, res) => {
     try {
         const { poId, invoiceDate = new Date(), paymentDetails, items } = req.body;
 
+        // Parse items if sent as a JSON string
+        const parsedItems = typeof items === 'string' ? JSON.parse(items) : items;
+
         // Validate required fields
-        if (!poId || !items || !Array.isArray(items) || items.length === 0) {
+        if (!poId || !parsedItems || !Array.isArray(parsedItems) || parsedItems.length === 0) {
             return res.status(400).json({ message: 'poId and items are required' });
+        }
+
+        // Handle file uploads
+        let documentPaths = [];
+        if (req.files && req.files.documents) {
+            await ensureUploadsDir();
+            const files = Array.isArray(req.files.documents) ? req.files.documents : [req.files.documents];
+            documentPaths = await Promise.all(files.map(async (file, index) => {
+                const fileName = `invoice_${Date.now()}_${index}${path.extname(file.name)}`;
+                const filePath = path.join(__dirname, '../../uploads', fileName);
+                await file.mv(filePath);
+                return `/uploads/${fileName}`;
+            }));
         }
 
         // Fetch PO details with OrderItems and Item
@@ -92,7 +120,7 @@ const createInvoice = async (req, res) => {
         let totalTax = 0;
         let allItemsTotalAmount = 0;
 
-        const invoiceItems = items.map(item => {
+        const invoiceItems = parsedItems.map(item => {
             const orderItem = purchaseOrder.orderItems.find(oi => oi.id === item.orderItemId);
             if (!orderItem) {
                 throw new Error(`Order Item ${item.orderItemId} not found`);
@@ -133,7 +161,7 @@ const createInvoice = async (req, res) => {
                 discount: orderItem.discount || 0,
                 taxPercentage,
                 taxAmount,
-                amount: amount.toFixed(2), // Explicitly include amount
+                amount: amount.toFixed(2),
                 totalAmount
             };
         });
@@ -146,7 +174,8 @@ const createInvoice = async (req, res) => {
             subtotal,
             totalTax,
             invoiceAmount: subtotal + totalTax,
-            paymentDetails
+            paymentDetails,
+            document: documentPaths.length > 0 ? documentPaths : null
         });
 
         // Update invoiceItems with invoiceId and create them
@@ -230,8 +259,11 @@ const updateInvoice = async (req, res) => {
         const { id } = req.params;
         const { invoiceNo, invoiceDate, paymentDetails, paymentDate, items } = req.body;
 
+        // Parse items if sent as a JSON string
+        const parsedItems = typeof items === 'string' ? JSON.parse(items) : items;
+
         // Validate required fields
-        if (!items || !Array.isArray(items) || items.length === 0) {
+        if (!parsedItems || !Array.isArray(parsedItems) || parsedItems.length === 0) {
             return res.status(400).json({ message: 'items are required' });
         }
 
@@ -242,6 +274,20 @@ const updateInvoice = async (req, res) => {
 
         if (!invoice) {
             return res.status(404).json({ message: 'Invoice not found' });
+        }
+
+        // Handle file uploads
+        let documentPaths = invoice.document || [];
+        if (req.files && req.files.documents) {
+            await ensureUploadsDir();
+            const files = Array.isArray(req.files.documents) ? req.files.documents : [req.files.documents];
+            const newPaths = await Promise.all(files.map(async (file, index) => {
+                const fileName = `invoice_${Date.now()}_${index}${path.extname(file.name)}`;
+                const filePath = path.join(__dirname, '../../Uploads', fileName);
+                await file.mv(filePath);
+                return `/uploads/${fileName}`;
+            }));
+            documentPaths = [...documentPaths, ...newPaths];
         }
 
         // Fetch PO details
@@ -264,7 +310,7 @@ const updateInvoice = async (req, res) => {
         let totalTax = 0;
         let allItemsTotalAmount = 0;
 
-        const updatedInvoiceItems = items.map(item => {
+        const updatedInvoiceItems = parsedItems.map(item => {
             const orderItem = purchaseOrder.orderItems.find(oi => oi.id === item.orderItemId);
             if (!orderItem) {
                 throw new Error(`Order Item ${item.orderItemId} not found`);
@@ -296,7 +342,7 @@ const updateInvoice = async (req, res) => {
             allItemsTotalAmount += totalAmount;
 
             return {
-                id: item.id, // For existing items
+                id: item.id,
                 invoiceId: invoice.id,
                 orderItemId: item.orderItemId,
                 itemId: orderItem.itemId,
@@ -306,7 +352,7 @@ const updateInvoice = async (req, res) => {
                 discount: orderItem.discount || 0,
                 taxPercentage,
                 taxAmount,
-                amount: amount.toFixed(2), // Explicitly include amount
+                amount: amount.toFixed(2),
                 totalAmount
             };
         });
@@ -319,7 +365,8 @@ const updateInvoice = async (req, res) => {
             totalTax,
             invoiceAmount: subtotal + totalTax,
             paymentDetails: paymentDetails || invoice.paymentDetails,
-            paymentDate: paymentDate || invoice.paymentDate
+            paymentDate: paymentDate || invoice.paymentDate,
+            document: documentPaths.length > 0 ? documentPaths : invoice.document
         });
 
         // Update or create invoice items
@@ -335,7 +382,7 @@ const updateInvoice = async (req, res) => {
                         discount: item.discount,
                         taxPercentage: item.taxPercentage,
                         taxAmount: item.taxAmount,
-                        amount: item.amount, // Include amount
+                        amount: item.amount,
                         totalAmount: item.totalAmount
                     },
                     { where: { id: item.id, invoiceId: invoice.id } }
