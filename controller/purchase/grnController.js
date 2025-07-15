@@ -117,22 +117,39 @@ const createGRN = async (req, res) => {
             return res.status(404).json({ message: 'Purchase Order not found' });
         }
 
-        // Generate grnNo in format GRN-DDMMYY-01
+        // Generate GRN number in format GRN-DDMMYY-XX
         const date = new Date(grnDate);
         const day = String(date.getDate()).padStart(2, '0');
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const year = String(date.getFullYear()).slice(-2);
         const dateString = `${day}${month}${year}`;
-        const lastGRN = await GRN.findOne({
-            where: { grnNo: { [Op.like]: `GRN-${dateString}-%` } },
+
+        // Optional: Reset GRN sequence per date (Uncomment the below line if needed)
+        // const likePattern = `GRN-${dateString}-%`;
+
+        // Global GRN sequence (continuous regardless of date)
+        const likePattern = 'GRN-%';
+
+        const lastGrn = await GRN.findOne({
+            where: { grnNo: { [Op.like]: likePattern } },
             order: [['grnNo', 'DESC']]
         });
 
         let sequence = 1;
-        if (lastGRN) {
-            const lastSequence = parseInt(lastGRN.grnNo.split('-')[2], 10);
-            sequence = lastSequence + 1;
+        if (lastGrn && lastGrn.grnNo) {
+            const parts = lastGrn.grnNo.split('-');
+            if (parts.length === 3) {
+                const lastSeq = parseInt(parts[2], 10);
+                if (!isNaN(lastSeq)) {
+                    sequence = lastSeq + 1;
+                } else {
+                    console.warn(`Invalid GRN format found: ${lastGrn.grnNo}. Starting sequence at 1.`);
+                }
+            } else {
+                console.warn(`Unexpected GRN format: ${lastGrn.grnNo}`);
+            }
         }
+
         const grnNo = `GRN-${dateString}-${String(sequence).padStart(2, '0')}`;
 
         // Validate OrderItem IDs and fetch itemId and unitId
@@ -153,10 +170,10 @@ const createGRN = async (req, res) => {
                 where: { orderItemId: orderItem.id }
             });
             const remainingQuantity = orderItem.quantity - (previousReceived || 0);
-            return { 
-                orderItemId: orderItem.id, 
-                remainingQuantity, 
-                itemId: orderItem.itemId, 
+            return {
+                orderItemId: orderItem.id,
+                remainingQuantity,
+                itemId: orderItem.itemId,
                 unitId: orderItem.unitId
             };
         }));

@@ -88,17 +88,18 @@ const createInvoice = async (req, res) => {
             return res.status(404).json({ message: 'Purchase Order not found' });
         }
 
-        // Generate invoiceNo in format IN-DDMMYY-01
+        // Generate invoiceNo in format IN-DDMMYY-XX (global incrementing sequence)
         const date = new Date(invoiceDate);
         const day = String(date.getDate()).padStart(2, '0');
         const month = String(date.getMonth() + 1).padStart(2, '0');
         const year = String(date.getFullYear()).slice(-2);
         const dateString = `${day}${month}${year}`;
 
+        // Look for the last invoice, regardless of date
         const lastInvoice = await Invoice.findOne({
             where: {
                 invoiceNo: {
-                    [Op.like]: `IN-${dateString}-%`
+                    [Op.like]: 'IN-%'
                 }
             },
             order: [['invoiceNo', 'DESC']]
@@ -107,13 +108,20 @@ const createInvoice = async (req, res) => {
         let sequence = 1;
         if (lastInvoice && lastInvoice.invoiceNo) {
             const parts = lastInvoice.invoiceNo.split('-');
-            if (parts.length === 3 && !isNaN(parts[2])) {
-                sequence = parseInt(parts[2], 10) + 1;
+            if (parts.length === 3) {
+                const lastSeq = parseInt(parts[2], 10);
+                if (!isNaN(lastSeq)) {
+                    sequence = lastSeq + 1;
+                } else {
+                    console.warn(`Invalid invoiceNo format found: ${lastInvoice.invoiceNo}. Starting sequence at 1.`);
+                }
             } else {
-                console.warn(`Invalid invoiceNo format found: ${lastInvoice.invoiceNo}. Starting sequence at 1.`);
+                console.warn(`Unexpected invoiceNo format: ${lastInvoice.invoiceNo}`);
             }
         }
+
         const invoiceNo = `IN-${dateString}-${String(sequence).padStart(2, '0')}`;
+
 
         // Calculate totals
         let subtotal = 0;
