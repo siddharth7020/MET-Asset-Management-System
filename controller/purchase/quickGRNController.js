@@ -35,6 +35,72 @@ const getQuickGRNById = async (req, res) => {
     }
 };
 
+// Function to generate the next storeCode sequence
+const getNextStoreCodeSequence = async (dateString, count = 1, transaction = null) => {
+    try {
+        // Validate dateString format (DDMMYY)
+        if (!dateString || !/^\d{6}$/.test(dateString)) {
+            throw new Error('Invalid dateString format. Expected DDMMYY.');
+        }
+
+        // Define the pattern for storeCode (e.g., Item-%)
+        const storeCodePattern = `Item-%`;
+
+        // Query the highest sequence from GRNItem
+        const lastGRNItem = await GRNItem.findOne({
+            where: { storeCode: { [Op.like]: storeCodePattern } },
+            order: [['storeCode', 'DESC']],
+            transaction
+        });
+
+        // Query the highest sequence from QuickGRNItem
+        const lastQuickGRNItem = await QuickGRNItem.findOne({
+            where: { storeCode: { [Op.like]: storeCodePattern } },
+            order: [['storeCode', 'DESC']],
+            transaction
+        });
+
+        // Extract sequence numbers
+        const sequences = [];
+
+        if (lastGRNItem && lastGRNItem.storeCode) {
+            const parts = lastGRNItem.storeCode.split('-');
+            if (parts.length === 3) {
+                const lastSequence = parseInt(parts[2], 10);
+                if (!isNaN(lastSequence)) {
+                    sequences.push(lastSequence);
+                }
+            }
+        }
+
+        if (lastQuickGRNItem && lastQuickGRNItem.storeCode) {
+            const parts = lastQuickGRNItem.storeCode.split('-');
+            if (parts.length === 3) {
+                const lastSequence = parseInt(parts[2], 10);
+                if (!isNaN(lastSequence)) {
+                    sequences.push(lastSequence);
+                }
+            }
+        }
+
+        // Determine the starting sequence number
+        const startSequence = sequences.length > 0 ? Math.max(...sequences) + 1 : 1;
+
+        // Generate storeCodes for the requested count
+        const storeCodes = Array.from({ length: count }, (_, index) => {
+            const nextSequence = startSequence + index;
+            return `Item-${dateString}-${nextSequence}`;
+        });
+
+        return storeCodes;
+    } catch (error) {
+        console.error('Error generating next storeCode sequence:', error);
+        throw error;
+    }
+};
+
+
+
 const createQuickGRN = async (req, res) => {
     try {
         const {
@@ -78,7 +144,7 @@ const createQuickGRN = async (req, res) => {
 
             for (const document of documents) {
                 if (!allowedTypes.includes(document.mimetype)) {
-                    return res.status(400).json({ message: `Invalid file type for ${document.name}. Only PDF, JPEG, and PNG are allowed.` });
+                    return res.status(400).json({ message: `Invalid file type for ${document.name}. Only PDF, JPEG, or PNG are allowed.` });
                 }
                 if (document.size > maxFileSize) {
                     return res.status(400).json({ message: `File ${document.name} exceeds 10MB limit.` });
@@ -121,48 +187,8 @@ const createQuickGRN = async (req, res) => {
         // Start transaction
         const transaction = await sequelize.transaction();
 
-        // Generate unique storeCode for each QuickGRNItem in format item-DDMMYY-N
-        let storeSequence = 1;
-        // Query both GRNItem and QuickGRNItem for the highest sequence
-        const lastGRNItem = await GRNItem.findOne({
-            where: { storeCode: { [Op.like]: 'Item-%' } },
-            order: [['storeCode', 'DESC']],
-            transaction
-        });
-
-        const lastQuickGRNItem = await QuickGRNItem.findOne({
-            where: { storeCode: { [Op.like]: 'Item-%' } },
-            order: [['storeCode', 'DESC']],
-            transaction
-        });
-
-        const sequences = [];
-
-        if (lastGRNItem && lastGRNItem.storeCode) {
-            const parts = lastGRNItem.storeCode.split('-');
-            if (parts.length === 3) {
-                const lastSequence = parseInt(parts[2], 10);
-                if (!isNaN(lastSequence)) sequences.push(lastSequence);
-            }
-        }
-
-        if (lastQuickGRNItem && lastQuickGRNItem.storeCode) {
-            const parts = lastQuickGRNItem.storeCode.split('-');
-            if (parts.length === 3) {
-                const lastSequence = parseInt(parts[2], 10);
-                if (!isNaN(lastSequence)) sequences.push(lastSequence);
-            }
-        }
-
-        if (sequences.length > 0) {
-            storeSequence = Math.max(...sequences) + 1;
-        }
-
         // Generate storeCodes for all items in this QuickGRN
-        const storeCodes = quickGRNItems.map((_, index) => {
-            const nextSequence = storeSequence + index;
-            return `Item-${dateString}-${nextSequence}`;
-        });
+        const storeCodes = await getNextStoreCodeSequence(dateString, quickGRNItems.length, transaction);
 
         try {
             // Create QuickGRN
