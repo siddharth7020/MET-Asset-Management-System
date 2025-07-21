@@ -32,6 +32,11 @@ const Invoice = sequelize.define('Invoice', {
         allowNull: false,
         defaultValue: 0.00
     },
+    OtherAmount: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: true,
+        defaultValue: 0.00
+    },
     invoiceAmount: {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false,
@@ -55,7 +60,7 @@ const Invoice = sequelize.define('Invoice', {
         set(value) {
             this.setDataValue('document', value ? JSON.stringify(value) : null);
         }
-    },
+    }
 }, {
     tableName: 'invoices',
     timestamps: true

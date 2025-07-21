@@ -8,7 +8,7 @@ const fs = require('fs').promises;
 
 // Ensure uploads directory exists
 const ensureUploadsDir = async () => {
-    const uploadsDir = path.join(__dirname, '../../uploads');
+    const uploadsDir = path.join(__dirname, '../../Uploads');
     try {
         await fs.mkdir(uploadsDir, { recursive: true });
     } catch (error) {
@@ -50,7 +50,7 @@ const getAllInvoices = async (req, res) => {
 // Create Invoice
 const createInvoice = async (req, res) => {
     try {
-        const { poId, invoiceDate = new Date(), paymentDetails, items } = req.body;
+        const { poId, invoiceDate = new Date(), paymentDetails, items, OtherAmount = 0.00 } = req.body;
 
         // Parse items if sent as a JSON string
         const parsedItems = typeof items === 'string' ? JSON.parse(items) : items;
@@ -67,7 +67,7 @@ const createInvoice = async (req, res) => {
             const files = Array.isArray(req.files.documents) ? req.files.documents : [req.files.documents];
             documentPaths = await Promise.all(files.map(async (file, index) => {
                 const fileName = `invoice_${Date.now()}_${index}${path.extname(file.name)}`;
-                const filePath = path.join(__dirname, '../../uploads', fileName);
+                const filePath = path.join(__dirname, '../../Uploads', fileName);
                 await file.mv(filePath);
                 return `/uploads/${fileName}`;
             }));
@@ -121,7 +121,6 @@ const createInvoice = async (req, res) => {
         }
 
         const invoiceNo = `IN-${dateString}-${String(sequence).padStart(2, '0')}`;
-
 
         // Calculate totals
         let subtotal = 0;
@@ -181,7 +180,8 @@ const createInvoice = async (req, res) => {
             invoiceDate,
             subtotal,
             totalTax,
-            invoiceAmount: subtotal + totalTax,
+            OtherAmount: parseFloat(OtherAmount).toFixed(2),
+            invoiceAmount: (subtotal + totalTax + parseFloat(OtherAmount)).toFixed(2),
             paymentDetails,
             document: documentPaths.length > 0 ? documentPaths : null
         });
@@ -265,7 +265,7 @@ const getInvoice = async (req, res) => {
 const updateInvoice = async (req, res) => {
     try {
         const { id } = req.params;
-        const { invoiceNo, invoiceDate, paymentDetails, paymentDate, items } = req.body;
+        const { invoiceNo, invoiceDate, paymentDetails, paymentDate, items, OtherAmount = 0.00 } = req.body;
 
         // Parse items if sent as a JSON string
         const parsedItems = typeof items === 'string' ? JSON.parse(items) : items;
@@ -371,7 +371,8 @@ const updateInvoice = async (req, res) => {
             invoiceDate: invoiceDate || invoice.invoiceDate,
             subtotal,
             totalTax,
-            invoiceAmount: subtotal + totalTax,
+            OtherAmount: parseFloat(OtherAmount).toFixed(2),
+            invoiceAmount: (subtotal + totalTax + parseFloat(OtherAmount)).toFixed(2),
             paymentDetails: paymentDetails || invoice.paymentDetails,
             paymentDate: paymentDate || invoice.paymentDate,
             document: documentPaths.length > 0 ? documentPaths : invoice.document
