@@ -24,6 +24,25 @@ const QuickInvoice = sequelize.define('quickInvoice', {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false
     },
+    OtherAmount: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: true,
+        defaultValue: 0.00
+    },
+    taxAmount: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: true,
+        defaultValue: 0.00
+    },
+    discountedAmount: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: true,
+        defaultValue: 0.00
+    },
+    totalAmountWithTax: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: false
+    },
     document: {
         type: DataTypes.STRING(1000), // Stores JSON array of file paths
         allowNull: true,

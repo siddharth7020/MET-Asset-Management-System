@@ -22,7 +22,9 @@ const calculateItemAmounts = (quantity, rate, discount, taxPercentage) => {
     throw new Error('Tax percentage cannot be negative.');
   }
 
-  const amount = qty * rt * (1 - disc / 100);
+  const baseAmount = qty * rt;
+  const discountAmount = baseAmount * (disc / 100);
+  const amount = baseAmount - discountAmount;
   if (amount < 0) {
     throw new Error('Calculated amount cannot be negative.');
   }
@@ -30,6 +32,8 @@ const calculateItemAmounts = (quantity, rate, discount, taxPercentage) => {
   const totalAmount = amount + taxAmount;
 
   return {
+    baseAmount: parseFloat(baseAmount.toFixed(2)),
+    discountAmount: parseFloat(discountAmount.toFixed(2)),
     amount: parseFloat(amount.toFixed(2)),
     taxAmount: parseFloat(taxAmount.toFixed(2)),
     totalAmount: parseFloat(totalAmount.toFixed(2)),
@@ -41,7 +45,7 @@ const createQuickInvoice = async (req, res) => {
 
   try {
     // Parse FormData fields
-    let { qGRNIds, qInvoiceDate, remark, taxDetails, quickInvoiceItems, existingDocuments } = req.body;
+    let { qGRNIds, qInvoiceDate, remark, taxDetails, quickInvoiceItems, existingDocuments, OtherAmount } = req.body;
     
     // Parse JSON-stringified fields
     try {
@@ -49,6 +53,7 @@ const createQuickInvoice = async (req, res) => {
       taxDetails = taxDetails ? JSON.parse(taxDetails) : {};
       quickInvoiceItems = quickInvoiceItems ? JSON.parse(quickInvoiceItems) : [];
       existingDocuments = existingDocuments ? JSON.parse(existingDocuments) : [];
+      OtherAmount = OtherAmount ? Number(JSON.parse(OtherAmount)) : 0;
     } catch (error) {
       await t.rollback();
       return res.status(400).json({ message: 'Invalid JSON format in form data.' });
@@ -56,7 +61,7 @@ const createQuickInvoice = async (req, res) => {
 
     let documentPaths = Array.isArray(existingDocuments) ? existingDocuments : [];
 
-    console.log('Create Quick Invoice Payload:', JSON.stringify({ qGRNIds, qInvoiceDate, remark, taxDetails, quickInvoiceItems, documentPaths }, null, 2));
+    console.log('Create Quick Invoice Payload:', JSON.stringify({ qGRNIds, qInvoiceDate, remark, taxDetails, quickInvoiceItems, documentPaths, OtherAmount }, null, 2));
 
     // Validate inputs
     if (!qGRNIds || !Array.isArray(qGRNIds) || qGRNIds.length === 0) {
@@ -74,6 +79,10 @@ const createQuickInvoice = async (req, res) => {
     if (!taxDetails || typeof taxDetails !== 'object') {
       await t.rollback();
       return res.status(400).json({ message: 'taxDetails must be provided as an object.' });
+    }
+    if (OtherAmount < 0) {
+      await t.rollback();
+      return res.status(400).json({ message: 'OtherAmount cannot be negative.' });
     }
 
     // Handle file uploads
@@ -144,7 +153,9 @@ const createQuickInvoice = async (req, res) => {
     const qInvoiceNo = `QINV-${today}-${counter}`;
 
     // Prepare and calculate invoice items
-    let invoiceTotal = 0;
+    let totalAmount = 0;
+    let taxAmount = 0;
+    let discountedAmount = 0;
     const invoiceItemsData = quickInvoiceItems.map((item) => {
       const grnItem = grnItems.find((gi) => gi.qGRNItemid === item.qGRNItemid);
       if (!grnItem) {
@@ -153,14 +164,16 @@ const createQuickInvoice = async (req, res) => {
       const taxPercentage = Number(taxDetails[item.qGRNItemid].taxPercentage);
       const discount = Number(item.discount);
       console.log(`Processing item ${item.qGRNItemid} with discount=${discount}`);
-      const { amount, taxAmount, totalAmount } = calculateItemAmounts(
+      const { baseAmount, discountAmount, amount, taxAmount: itemTaxAmount, totalAmount: itemTotalAmount } = calculateItemAmounts(
         item.quantity,
         item.rate,
         discount,
         taxPercentage
       );
 
-      invoiceTotal += totalAmount;
+      totalAmount += baseAmount;
+      taxAmount += itemTaxAmount;
+      discountedAmount += discountAmount;
 
       return {
         qGRNId: item.qGRNId,
@@ -172,10 +185,13 @@ const createQuickInvoice = async (req, res) => {
         discount: parseFloat(discount.toFixed(2)),
         amount,
         taxPercentage: parseFloat(taxPercentage.toFixed(2)),
-        taxAmount,
-        totalAmount,
+        taxAmount: itemTaxAmount,
+        totalAmount: totalAmount,
       };
     });
+
+    // Calculate totalAmountWithTax
+    const totalAmountWithTax = parseFloat((totalAmount + OtherAmount + taxAmount - discountedAmount).toFixed(2));
 
     // Create the Invoice
     const invoice = await QuickInvoice.create(
@@ -183,7 +199,11 @@ const createQuickInvoice = async (req, res) => {
         qInvoiceNo,
         qInvoiceDate,
         qGRNIds,
-        totalAmount: parseFloat(invoiceTotal.toFixed(2)),
+        totalAmount: parseFloat(totalAmount.toFixed(2)),
+        OtherAmount: parseFloat(OtherAmount.toFixed(2)),
+        taxAmount: parseFloat(taxAmount.toFixed(2)),
+        discountedAmount: parseFloat(discountedAmount.toFixed(2)),
+        totalAmountWithTax,
         remark,
         document: documentPaths,
       },
@@ -245,7 +265,7 @@ const updateQuickInvoice = async (req, res) => {
   try {
     const { id } = req.params;
     // Parse FormData fields
-    let { qGRNIds, qInvoiceDate, remark, quickInvoiceItems, taxDetails, existingDocuments } = req.body;
+    let { qGRNIds, qInvoiceDate, remark, quickInvoiceItems, taxDetails, existingDocuments, OtherAmount } = req.body;
 
     // Parse JSON-stringified fields
     try {
@@ -253,6 +273,7 @@ const updateQuickInvoice = async (req, res) => {
       taxDetails = taxDetails ? JSON.parse(taxDetails) : {};
       quickInvoiceItems = quickInvoiceItems ? JSON.parse(quickInvoiceItems) : [];
       existingDocuments = existingDocuments ? JSON.parse(existingDocuments) : [];
+      OtherAmount = OtherAmount ? Number(JSON.parse(OtherAmount)) : 0;
     } catch (error) {
       await t.rollback();
       return res.status(400).json({ message: 'Invalid JSON format in form data.' });
@@ -260,7 +281,7 @@ const updateQuickInvoice = async (req, res) => {
 
     let documentPaths = Array.isArray(existingDocuments) ? existingDocuments : [];
 
-    console.log('Update Quick Invoice Payload:', JSON.stringify({ qGRNIds, qInvoiceDate, remark, quickInvoiceItems, taxDetails, documentPaths }, null, 2));
+    console.log('Update Quick Invoice Payload:', JSON.stringify({ qGRNIds, qInvoiceDate, remark, quickInvoiceItems, taxDetails, documentPaths, OtherAmount }, null, 2));
 
     // Validate inputs
     if (!qGRNIds || !Array.isArray(qGRNIds) || qGRNIds.length === 0) {
@@ -278,6 +299,10 @@ const updateQuickInvoice = async (req, res) => {
     if (!taxDetails || typeof taxDetails !== 'object') {
       await t.rollback();
       return res.status(400).json({ message: 'taxDetails must be provided as an object.' });
+    }
+    if (OtherAmount < 0) {
+      await t.rollback();
+      return res.status(400).json({ message: 'OtherAmount cannot be negative.' });
     }
 
     // Handle file uploads
@@ -381,7 +406,9 @@ const updateQuickInvoice = async (req, res) => {
     }
 
     // Prepare and calculate invoice items
-    let invoiceTotal = 0;
+    let totalAmount = 0;
+    let taxAmount = 0;
+    let discountedAmount = 0;
     const invoiceItemsData = quickInvoiceItems.map((item) => {
       const grnItem = grnItems.find((gi) => gi.qGRNItemid === item.qGRNItemid);
       if (!grnItem) {
@@ -391,14 +418,16 @@ const updateQuickInvoice = async (req, res) => {
       const taxPercentage = Number(taxDetails[item.qGRNItemid].taxPercentage);
       const discount = Number(item.discount);
       console.log(`Updating item ${item.qGRNItemid} with discount=${discount}`);
-      const { amount, taxAmount, totalAmount } = calculateItemAmounts(
+      const { baseAmount, discountAmount, amount, taxAmount: itemTaxAmount, totalAmount: itemTotalAmount } = calculateItemAmounts(
         item.quantity,
         item.rate,
         discount,
         taxPercentage
       );
 
-      invoiceTotal += totalAmount;
+      totalAmount += baseAmount;
+      taxAmount += itemTaxAmount;
+      discountedAmount += discountAmount;
 
       return {
         qInvoiceItemId: item.qInvoiceItemId,
@@ -412,10 +441,13 @@ const updateQuickInvoice = async (req, res) => {
         discount: parseFloat(discount.toFixed(2)),
         amount,
         taxPercentage: parseFloat(taxPercentage.toFixed(2)),
-        taxAmount,
-        totalAmount,
+        taxAmount: itemTaxAmount,
+        totalAmount: itemTotalAmount,
       };
     });
+
+    // Calculate totalAmountWithTax
+    const totalAmountWithTax = parseFloat((totalAmount + OtherAmount + taxAmount - discountedAmount).toFixed(2));
 
     // Update QuickInvoice
     await invoice.update(
@@ -423,7 +455,11 @@ const updateQuickInvoice = async (req, res) => {
         qInvoiceNo,
         qInvoiceDate,
         qGRNIds,
-        totalAmount: parseFloat(invoiceTotal.toFixed(2)),
+        totalAmount: parseFloat(totalAmount.toFixed(2)),
+        OtherAmount: parseFloat(OtherAmount.toFixed(2)),
+        taxAmount: parseFloat(taxAmount.toFixed(2)),
+        discountedAmount: parseFloat(discountedAmount.toFixed(2)),
+        totalAmountWithTax,
         remark,
         document: documentPaths,
       },
